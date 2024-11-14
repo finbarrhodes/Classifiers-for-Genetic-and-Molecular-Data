@@ -30,6 +30,80 @@ Note that the `echo = FALSE` parameter was added to the code chunk to prevent pr
 
 
 ```{r}
+data <- read.csv("data2.csv.gz")
 
 ```
+
+Binding: Indicates that the compound interacts or attaches effectively to the thrombin target site.
+Non-binding: Indicates that the compound does not interact effectively with thrombin.
+In the context of drug discovery, thrombin is a protein that could be a target for drugs aimed at affecting blood clotting, and identifying compounds that bind to thrombin can be a critical step in developing new medications.
+
+```{r}
+
+# Count NA values for each column
+na_counts <- sapply(data, function(x) sum(is.na(x)))
+
+# Print the result
+totalna <- sum(na_counts)
+# print(totalna) #printed 0 so data is clean
+
+table(data[, 1])
+
+```
+```{r}
+# summary data[, 2:100001]) will output too much data
+# Filter rows where the compound binds to the target (binding status = 1)
+binding_data <- data[data[, 1] == 1, ]
+
+# Apply summary to the binding rows, excluding the first column (target variable)
+# summary(binding_data[, -1])
+# head(binding_data)
+library(ggplot2)
+ggplot(data, aes(x = data[, 1])) + geom_bar() + labs(x = "Binding Status", y = "Count")
+
+```
+
+
+
+```{r}
+feature_means <- colSums(data[, 2:100001])
+hist(feature_means, breaks = 50, main = "Distribution of Feature Means", xlab = "Mean of Binary Features")
+
+```
+
+```{r}
+head(data)
+```
+
+
+```{r}
+
+feature_means_nonzero <- feature_means[feature_means == 50]
+
+#hist(feature_means, breaks = 50, main = "Distribution of Feature Means that arent zero", xlab = "Mean of Binary Features")
+
+print(feature_means_nonzero)
+```
+```{r}
+# Sample data frame
+data2a <- data[,1:1001]
+#head(data2)
+regfit_fwd <-  regsubsets(label ~ .,
+                        data = data,
+                        nvmax = 2,
+                        method = "seqrep")
+summary(regfit_fwd)
+
+# Con data me aparece esto: Error: no se puede ubicar un vector de tamaño  37.3 Gb
+```
+```{r}
+sum(is.na(data2a))      # Check for NA values
+sum(is.nan(as.matrix(data2a)))  # Check for NaN values
+sum(is.infinite(as.matrix(data2a)))  # Check for Inf values
+
+```
+
+
+
+
 
