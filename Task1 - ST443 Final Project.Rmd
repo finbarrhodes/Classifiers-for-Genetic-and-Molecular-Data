@@ -1,0 +1,92 @@
+---
+title: "Task 1 - ST443 Project"
+author: "Finbar Rhodes"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(tidyverse)
+```
+
+## T1.1
+
+```{r reading in data, echo=TRUE}
+
+task1data <- read.csv("/Users/finbarrhodes/Documents/ST443/Final Project/data1.csv.gz")
+table(task1data$label, useNA = "ifany")
+```
+
+
+```{r missing data, echo=TRUE}
+
+abc <- task1data |> is.na() |> colSums() |> table()
+if (abc[1] == ncol(task1data)){
+  print("We have that there are no missing data in any columns which will be hekpful in our analysis")
+}
+```
+
+```{r sparsity, echo=FALSE}
+total_zeros <- sum(rowSums(task1data == 0))
+total_entries <- 5471 * 4124
+total_zeros / total_entries
+```
+Our given data is reasonably sparse. In fact, below we have shown that approximately 66.2% of this dataset are zero entries. We can explore sparsity across the covariates as well. 
+
+``` {r covariate sparsity, echo=TRUE}
+covariate_sparsities <- data.frame(Gene = colnames(task1data)[-1], 
+                                   Sparsity = rep(0, ncol(task1data)-1)) 
+
+for (i in 2:ncol(task1data)){
+  count <- length(which(task1data[,i] == 0))
+  covariate_sparsities$Sparsity[i-1] <- count / nrow(task1data)
+}
+
+summary(covariate_sparsities)
+ggplot(covariate_sparsities, aes(Sparsity)) + 
+  geom_histogram(color = "black", fill = "white" ,bins = 40) + 
+  ggtitle("Distribution of Sparsity Rates Across Covariates") + 
+  theme_bw()
+
+```
+- We might expect to see some variable subset selection to seek a much smaller model than the full one
+
+- In the decision context, we may see a lot of pruning if we look to make large trees
+
+
+```{r Kaan's Work, echo=TRUE}
+#Libraries: ----
+rm(list=ls())
+library(plotly)
+
+
+library(readr); library(dplyr); library(tidyr); library(ggplot2) 
+# you can import do a library called tidyverse which includes all of these I think, it's great.  - Finbar
+
+
+library(GGally)
+library(DataExplorer)
+
+#EDA: ----
+task1 <- read.csv("data1.csv")
+
+dim(task1) #Dimension of our data set.
+
+names(task1) #Names of the columns.
+
+summary(task1[1:5]) #Otherwise we have too many entries.
+
+plot_missing(task1[1:5]) #NA Values.
+
+plot_bar(task1[1:5]) #To assess the Distribution.
+
+plot_correlation(task1[1:5]) #Heat Map - significant for the classification setting.
+
+ggpairs(data = task1[1:5])
+
+
+```
+
+
