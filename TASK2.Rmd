@@ -4,34 +4,18 @@ output: html_document
 date: "2024-11-13"
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+--- LIBRARIES ---
+
+```{r}
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(ISLR)
 ```
-
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
-```
-
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
-
 
 ```{r}
 data <- read.csv("data2.csv.gz")
-
 ```
 
 Binding: Indicates that the compound interacts or attaches effectively to the thrombin target site.
@@ -39,25 +23,14 @@ Non-binding: Indicates that the compound does not interact effectively with thro
 In the context of drug discovery, thrombin is a protein that could be a target for drugs aimed at affecting blood clotting, and identifying compounds that bind to thrombin can be a critical step in developing new medications.
 
 ```{r}
-
-# Count NA values for each column
+# Check for NA values for each column
 na_counts <- sapply(data, function(x) sum(is.na(x)))
-
-# Print the result
 totalna <- sum(na_counts)
-# print(totalna) #printed 0 so data is clean
-
-table(data[, 1])
-
+print(totalna)
 ```
 ```{r}
-# summary data[, 2:100001]) will output too much data
-# Filter rows where the compound binds to the target (binding status = 1)
+# Compare Binding vs Non-binding
 binding_data <- data[data[, 1] == 1, ]
-
-# Apply summary to the binding rows, excluding the first column (target variable)
-# summary(binding_data[, -1])
-# head(binding_data)
 library(ggplot2)
 ggplot(data, aes(x = data[, 1])) + geom_bar() + labs(x = "Binding Status", y = "Count")
 
@@ -84,18 +57,36 @@ feature_means_nonzero <- feature_means[feature_means == 50]
 
 print(feature_means_nonzero)
 ```
+
 ```{r}
 # Sample data frame
-data2a <- data[,1:1001]
+data2a <- data[,0:20]
+data2a <- na.omit(data2a)
 #head(data2)
 regfit_fwd <-  regsubsets(label ~ .,
-                        data = data,
-                        nvmax = 2,
-                        method = "seqrep")
+                        data = data2a,
+                        nvmax = 5,
+                        method = "forward")
 summary(regfit_fwd)
 
 # Con data me aparece esto: Error: no se puede ubicar un vector de tamaño  37.3 Gb
 ```
+
+```{r}
+par(mfrow = c(2, 2))
+plot(regfit_fwd, scale = "r2")
+plot(regfit_fwd, scale = "adjr2")
+plot(regfit_fwd, scale = "Cp")
+plot(regfit_fwd, scale = "bic")
+```
+
+
+```{r}
+data2a <- data[,0:10000]
+head(data2a)
+```
+
+
 ```{r}
 sum(is.na(data2a))      # Check for NA values
 sum(is.nan(as.matrix(data2a)))  # Check for NaN values
@@ -103,7 +94,322 @@ sum(is.infinite(as.matrix(data2a)))  # Check for Inf values
 
 ```
 
+ ----------- START LANS ------------
+
+```{r}
+head(data)
+```
+
+```{r}
+count <- 0  # Initialize count
 
 
+# Count the amount of binding and non binding Y we have
+for (i in seq_len(nrow(data))) {
+  if (data[i, 1] == -1) {
+    count <- count + 1
+  }
+}
+
+binding_count = nrow(data) - count
+non_binding_count = count
+```
+
+```{r, echo=FALSE}
+# Bar plot of proportions in Y
+table(data[[1]])
+
+# Bar plot for binding vs. non-binding compounds
+ggplot(data.frame(Class = data[[1]]), aes(x = factor(Class))) +
+  geom_bar() +
+  labs(title = "Distribution of Binding (1) vs. Non-Binding (0) Compounds",
+       x = "Binding Outcome", y = "Count")
+```
+
+
+```{r}
+data <- na.omit(data)
+```
+
+
+```{r}
+# Calculate the proportion of `1`s for each feature
+features <- data[, -1]
+feature_proportion <- colMeans(features)
+
+# Calculate variance for each feature
+feature_variance <- apply(features, 2, var)
+
+# Combine proportions and variances into a summary table
+feature_summary <- data.frame(
+  Feature = names(feature_proportion),
+  Proportion_of_Ones = feature_proportion,
+  Variance = feature_variance
+)
+
+# Display the summary statistics
+feature_summary
+
+ggplot(feature_summary, aes(x = Proportion_of_Ones)) +
+  geom_histogram(binwidth = 0.01, fill = "skyblue", color = "black") +
+  labs(title = "Distribution of Proportion of `1`s Across Features",
+       x = "Proportion of `1`s", y = "Count of Features")
+```
+
+```{r}
+# Assuming 'features' is your data frame or matrix
+feature_proportion <- colMeans(features)
+
+# Find the minimum mean value
+min_value <- min(feature_proportion)
+
+# Extract features with the minimum mean value
+min_features <- names(feature_proportion[feature_proportion == min_value])
+num_min_features <- length(min_features)
+print(num_min_features)
+print(min_value)
+
+```
+There are 11881 features that are all 0 for the 800 rows.
+
+Feature selection using regularization - Shrinking the coefficients that are unimportant for predictions 
+which results in some coefficients to become 0.
+```{r} 
+# Load necessary libraries
+library(Matrix)
+library(glmnet)
+# Convert your features data frame to a sparse matrix for efficiency and easier computations
+#Sparse matrices only store non-zero elements and their positions
+sparse_data <- as(features, "sparseMatrix")
+
+
+# Define your target variable (assuming the target variable is the first column in `data`)
+y <- data[, 1]
+```
+
+
+glmnet:
+Fits a generalized linear model using a regularization path (either Lasso, Ridge, or Elastic Net) for a range of lambda values.
+Does not perform cross-validation; it fits the model for a specified sequence of lambda values, allowing you to examine the entire regularization path.
+Useful for examining the effect of lambda on the coefficients (solution path) without determining an optimal value for lambda.
+Example use case: Exploring how the coefficients vary as the regularization strength changes across different lambda values.
+```{r}
+# Fit a regularized logistic regression model using glmnet
+# Lasso (alpha = 1), Ridge (alpha = 0), or Elastic Net (alpha = 0.5)
+fit_1 <- glmnet(sparse_data, y, family = "binomial", alpha = 1)  # Lasso regularization
+
+plot(fit_1, xvar="lambda", label= TRUE)
+```
+
+
+cv.glmnet:
+Builds on glmnet by adding cross-validation to determine the best lambda for model performance.
+Automatically performs k-fold cross-validation (default is 10-fold) to find the lambda that minimizes cross-validated error.
+Provides two optimal values:
+lambda.min: The value of lambda that gives the minimum cross-validation error.
+lambda.1se: The largest lambda within one standard error of lambda.min, offering a more regularized (simpler) model.
+Example use case: Selecting an optimal lambda value based on cross-validation.
+
+```{r}
+# Fit a regularized logistic regression model using glmnet with cross-validation
+# Regularisation using either LASSO when alpha=1, RIDGE REGRESSION when alpha= 0, Mix of LASSO and RIDGE alpha= 1/2
+
+#LASS0
+cv_fit_1 <- cv.glmnet(sparse_data, y, family = "binomial", parallel = TRUE, alpha= 1)
+
+# Display the best lambda value (regularization parameter)
+best_lambda_1 <- cv_fit_1$lambda.min
+print(best_lambda_1)
+
+# To make predictions with the model
+predictions_1 <- predict(cv_fit_1, sparse_data, s = "lambda.min", type = "response")
+
+# Get the coefficients of the selected features
+selected_features_1 <- coef(cv_fit_1, s = "lambda.min")
+
+# Convert to a standard matrix to make subsetting easier
+selected_features_1<- as.matrix(selected_features_1)
+
+# Extract and print only the non-zero coefficients
+selected_features_nonzero_1 <- selected_features_1[selected_features_1 != 0, ]
+print(selected_features_nonzero_1)
+
+```
+
+
+```{r}
+## plot of the solution path, i.e. estimated coefficients vs log (lambda), where lambda is the tuning parameter
+plot(cv_fit_1, xvar="lambda", label= TRUE)
+```
+The dashed lines point to:
+The 𝜆 with the lowest MSE
+The 𝜆with MSE less than one standard deviation away from the minimum MSE.
+
+
+
+We can do the same for the Ridge regression and the mix of Ridge and Mix regression
+```{r} 
+#RIDGE REGRESSION
+
+#cv_fit_2<- cv.glmnet(sparse_data, y, family = "binomial", parallel = TRUE, alpha= 0)
+#LASSO + RIDGE REGRESSION
+cv_fit_3<- cv.glmnet(sparse_data, y, family = "binomial", parallel = TRUE, alpha= 1/2)
+
+
+#best_lambda_2 <- cv_fit_2$lambda.min
+#print(best_lambda_2)
+best_lambda_3 <- cv_fit_3$lambda.min
+print(best_lambda_3)
+
+#predictions_2 <- predict(cv_fit_2, sparse_data, s = "lambda.min", type = "response")
+predictions_3 <- predict(cv_fit_3, sparse_data, s = "lambda.min", type = "response")
+
+#selected_features_2 <- coef(cv_fit_2, s = "lambda.min")
+selected_features_3 <- coef(cv_fit_3, s = "lambda.min")
+
+#selected_features_2<- as.matrix(selected_features_2)
+selected_features_3<- as.matrix(selected_features_3)
+
+#selected_features_nonzero_2 <- selected_features_2[selected_features_2 != 0, ]
+# print(selected_features_nonzero_2)
+selected_features_nonzero_3 <- selected_features_3[selected_features_3 != 0, ]
+print(selected_features_nonzero_3)
+
+```
+```{r}
+plot(cv_fit_3, xvar="lambda", label= TRUE)
+```
+I commented the ridge regression out of the code because it keeps all the features and just makes the coefficeints smaller while the other models actually removes features by shrinking they coefficeints to 0.
+
+
+We can test on how well the 2 model perform top choose the best:
+```{r}
+# We can get the cross validation test error of the 3 methods to see which one performs best on our dataset:
+lasso_error <- min(cv_fit_1$cvm)
+#ridge_r_error <- min(cv_fit_2$cvm)
+mix_error <- min(cv_fit_3$cvm)
+
+
+#We can also compute the AIC and BIC of each model
+log_likelihood <- sum(y * log(predictions_1) + (1 - y) * log(1 - predictions_1))
+log_likelihood <- sum(y * log(predictions_3) + (1 - y) * log(1 - predictions_3))
+
+# Get the number of non-zero coefficients (excluding the intercept)
+d_1<- sum(coef(cv_fit_1, s = "lambda.min") != 0) - 1  # Subtract 1 to exclude intercept
+d_3<- sum(coef(cv_fit_3, s = "lambda.min") != 0) - 1  # Subtract 1 to exclude intercept
+
+# Number of observations
+n <- length(y)
+
+# Calculate AIC and BIC 
+# LASSO
+aic_1 <- -2 * log_likelihood + 2 * d_1
+bic_1 <- -2 * log_likelihood + log(n) * d_1
+#MIX 
+aic_3 <- -2 * log_likelihood + 2 * d_3
+bic_3<- -2 * log_likelihood + log(n) * d_3
+
+# Print results
+cat("Lasso Error:", lasso_error, "\n")
+#cat("Ridge Error:", ridge_r_error, "\n")
+cat("Elastic Net Error:", mix_error, "\n")
+
+
+cat("Lasso AIC:", aic_1, "\n")
+cat("Lasso BIC:", bic_1, "\n")
+cat("Mix AIC:", aic_3, "\n")
+cat("Mix BIC:", bic_3, "\n")
+```
+This Lasso is the minimum error indicates the best achievable prediction accuracy (under cross-validation) with the Lasso model using the optimal lambda that minimizes error. The model with the lower cross-validated error is typically the better choice for prediction, as it suggests better performance on unseen data.
+
+AIC and BIC are metrics that balance model fit and complexity. Both penalize models with more parameters, with BIC generally penalizing complexity more strongly than AIC.
+
+Clearly LASSO is the optimal model on our dataset as it has the lowest aic, bic and test error.
+
+
+----------- FINISH LANS ------------
+
+### After using regularization for feature selction we will now use Stepwise methodes:
+
+# FOWARD SELECTION
+
+```{r}
+# Load necessary libraries
+library(Matrix)
+library(glmnet)
+
+# Step 1: Convert features to a sparse matrix
+# sparse_data <- as(as.matrix(data[, -1]), "sparseMatrix")  # Exclude the first column (target)
+# I had to change the data bc I was getting the following error:
+# Error: from glmnet C++ code (error code 7777); All used predictors have zero variance
+
+
+# Preprocess to remove constant features
+non_constant_columns <- apply(sparse_data, 2, function(col) var(col) > 0)
+sparse_data <- sparse_data[, non_constant_columns]
+
+# Step 2: Define your target variable
+y <- as.factor(data[, 1])  # Convert target variable to a factor if binary
+y_bin <- ifelse(y == -1, 0, 1)
+
+# Initialize variables
+n_features <- ncol(sparse_data)
+selected_features <- 3  # Starting with X2
+remaining_features <- setdiff(1:n_features, selected_features)
+
+# Forward stepwise selection
+for (step in 1:2) {
+  best_score <- -Inf
+  best_feature <- NULL
+  
+  for (feature in remaining_features) {
+    current_features <- c(selected_features, feature)
+    x_subset <- sparse_data[, current_features, drop = FALSE]
+    
+    # Skip iteration if x_subset contains constant features
+    if (any(apply(x_subset, 2, var) == 0)) next
+    
+    # Fit the model
+    model <- cv.glmnet(
+      x = x_subset,
+      y = y_bin,
+      family = "binomial",
+      alpha = 1,
+      nfolds = 5
+    )
+    
+    # Evaluate performance
+    score <- max(model$cvm)
+    if (score > best_score) {
+      best_score <- score
+      best_feature <- feature
+    }
+  }
+  
+  # Add the best feature
+  if (!is.null(best_feature)) {
+    selected_features <- c(selected_features, best_feature)
+    remaining_features <- setdiff(remaining_features, best_feature)
+    cat("Step", step, "- Selected feature:", best_feature, "Score:", best_score, "\n")
+  } else {
+    cat("No valid features to add at step", step, "\n")
+    break
+  }
+}
+
+# Step 6: Final model with selected features
+final_features <- selected_features
+final_model <- glmnet(
+  x = sparse_data[, final_features, drop = FALSE],
+  y = y_bin,
+  family = "binomial",
+  alpha = 1
+)
+
+# Summary of selected features
+print(final_features)
+
+
+```
 
 
