@@ -27,7 +27,9 @@ In the context of drug discovery, thrombin is a protein that could be a target f
 na_counts <- sapply(data, function(x) sum(is.na(x)))
 totalna <- sum(na_counts)
 print(totalna)
+
 ```
+
 ```{r}
 # Compare Binding vs Non-binding
 binding_data <- data[data[, 1] == 1, ]
@@ -40,7 +42,7 @@ ggplot(data, aes(x = data[, 1])) + geom_bar() + labs(x = "Binding Status", y = "
 
 ```{r}
 feature_means <- colSums(data[, 2:100001])
-hist(feature_means, breaks = 50, main = "Distribution of Feature Means", xlab = "Mean of Binary Features")
+hist(feature_means, breaks = 50, main = "Distribution of Feature Sums", xlab = "Mean of Binary Features")
 
 ```
 
@@ -59,32 +61,41 @@ print(feature_means_nonzero)
 ```
 
 ```{r}
-# Sample data frame
-data2a <- data[,0:20]
-data2a <- na.omit(data2a)
+data1 <- data
+data2 <- data
+data3 <- data
+data4 <- data
+
+y <- as.factor(data[, 1])  # Convert target variable to a factor if binary
+y_bin <- ifelse(y == -1, 0, 1)
+
+
+```
+
+```{r}
+data <- na.omit(data)
+```
+
+```{r}
 #head(data2)
-regfit_fwd <-  regsubsets(label ~ .,
-                        data = data2a,
-                        nvmax = 5,
-                        method = "forward")
+
+train_index <- sample(seq_len(nrow(data)), size = 0.5 * nrow(data))
+train_data <- data[train_index, ]
+test_data <- data[-train_index,  ]
+
+y1 <- as.factor(train_data[, 1])  # Convert target variable to a factor if binary
+
+
+
+regfit_fwd <-  regsubsets(y1 ~ .,
+                        data = train_data,
+                        nvmax = 2,
+                        method = "forward",
+                        really.big = TRUE)
+
 summary(regfit_fwd)
-
-# Con data me aparece esto: Error: no se puede ubicar un vector de tamaño  37.3 Gb
 ```
 
-```{r}
-par(mfrow = c(2, 2))
-plot(regfit_fwd, scale = "r2")
-plot(regfit_fwd, scale = "adjr2")
-plot(regfit_fwd, scale = "Cp")
-plot(regfit_fwd, scale = "bic")
-```
-
-
-```{r}
-data2a <- data[,0:10000]
-head(data2a)
-```
 
 
 ```{r}
@@ -129,11 +140,17 @@ ggplot(data.frame(Class = data[[1]]), aes(x = factor(Class))) +
 
 ```{r}
 data <- na.omit(data)
+
+# ------- CHANGING label to binary 0/1 --------
+y <- as.factor(data[, 1])  # Convert target variable to a factor if binary
+
+7885787
 ```
 
 
 ```{r}
 # Calculate the proportion of `1`s for each feature
+
 features <- data[, -1]
 feature_proportion <- colMeans(features)
 
@@ -157,32 +174,180 @@ ggplot(feature_summary, aes(x = Proportion_of_Ones)) +
 ```
 
 ```{r}
-# Assuming 'features' is your data frame or matrix
-feature_proportion <- colMeans(features)
+# Find duplicate columns
+unique_data <- data[, !duplicated(as.list(data))]
+num_repeated <- ncol(data) - ncol(unique_data)
 
-# Find the minimum mean value
-min_value <- min(feature_proportion)
+# Output unique dataset and count of repeated columns
+cat("Number of repeated columns removed:", num_repeated, "\n")
 
-# Extract features with the minimum mean value
-min_features <- names(feature_proportion[feature_proportion == min_value])
-num_min_features <- length(min_features)
-print(num_min_features)
-print(min_value)
+# ADDING ZERO COLUMNS 
+if (nrow(unique_data) != 800) {
+  stop("The dataset 'unique_data' must have exactly 800 rows.")
+}
+
+# Create a data frame with 50,000 columns filled with zeros
+zero_columns <- as.data.frame(matrix(0, nrow = 800, ncol = 50000))
+
+# Assign column names to the zero_columns
+colnames(zero_columns) <- paste0("zero_col_", seq_len(50000))
+
+# Append the zero columns to unique_data
+unique_data_with_zeros <- cbind(unique_data, zero_columns)
+
+# Print dimensions of the new dataset
+cat("The new dataset has dimensions:", dim(unique_data_with_zeros), "\n")
+
 
 ```
-There are 11881 features that are all 0 for the 800 rows.
+
+# ---------- GERVA -----------
+
+
+Lets run Lasso with the unique dataset
+```{r}
+library(Matrix)
+library(glmnet)
+# This is for testing to add 50k Zero Columns
+#data1_cleaned <- unique_data_with_zeros 
+
+data1_cleaned <- unique_data
+features1a <- data1_cleaned[,-1]
+sparse_data1a <- as(features1a, "sparseMatrix")
+y <- data[, 1]
+
+fit_data1 <- glmnet(sparse_data1a, y, family = "binomial", alpha = 1)  # Lasso regularization
+
+#LASSO CLEAN
+cv_fit_1d <- cv.glmnet(sparse_data1a, y, family = "binomial", parallel = TRUE, alpha= 1)
+predictions_1d <- predict(cv_fit_1d, sparse_data1a, s = "lambda.min", type = "response")
+selected_features_1d <- coef(cv_fit_1d, s = "lambda.min")
+selected_features_1d<- as.matrix(selected_features_1d)
+selected_features_nonzero_1d <- selected_features_1d[selected_features_1d != 0, ]
+cat("There are a total of ",length(selected_features_nonzero_1d)," features according to LASSO in unique dataset","\n")
+print(selected_features_nonzero_1d) 
+
+#MIX CLEAN
+cv_fit_3d <- cv.glmnet(sparse_data1a, y, family = "binomial", parallel = TRUE, alpha= 1/2)
+predictions_3d <- predict(cv_fit_3d, sparse_data1a, s = "lambda.min", type = "response")
+selected_features_3d <- coef(cv_fit_3d, s = "lambda.min")
+selected_features_3d<- as.matrix(selected_features_3d)
+selected_features_nonzero_3d <- selected_features_3d[selected_features_3d != 0, ]
+cat("There are a total of ",length(selected_features_nonzero_3d)," features according to LASSO in unique dataset","\n")
+print(selected_features_nonzero_3d) 
+
+
+################ FEATURES SELECTED BY LASSO AND NET ELASTIC ################
+
+```
+LASSO Comparison between unique data and Original Data:
+```{r}
+# The outcome is not exactly the same either in features or in coefficients.
+a <- sort(selected_features_nonzero_1d, decreasing = T)
+print(a)
+b <- sort(selected_features_nonzero_1, decreasing = T)
+print(b)
+```
+
+```{r}
+plot(cv_fit_3, xvar="lambda", label= TRUE)
+```
+I commented the ridge regression out of the code because it keeps all the features and just makes the coefficeints smaller while the other models actually removes features by shrinking they coefficeints to 0.
+
+
+We can test on how well the 2 model perform top choose the best: ***WITH UNIQUE DATA***
+```{r}
+# Compare lasso and Mix, both clean
+lasso_errord <- min(cv_fit_1d$cvm)
+mix_errord <- min(cv_fit_3d$cvm)
+
+#We can also compute the AIC and BIC of each model
+log_likelihoodd_1d <- sum(y * log(predictions_1d) + (1 - y) * log(1 - predictions_1d))
+log_likelihoodd_3d <- sum(y * log(predictions_3d) + (1 - y) * log(1 - predictions_3d))
+d_1d<- sum(coef(cv_fit_1d, s = "lambda.min") != 0) - 1  # Subtract 1 to exclude intercept
+d_3d<- sum(coef(cv_fit_3d, s = "lambda.min") != 0) - 1  # Subtract 1 to exclude intercept
+
+n <- length(y)
+
+# Calculate AIC and BIC 
+# LASSO
+aic_1d <- -2 * log_likelihoodd_1d + 2 * d_1d
+bic_1d <- -2 * log_likelihoodd_1d + log(n) * d_1d
+#MIX 
+aic_3d <- -2 * log_likelihoodd_3d + 2 * d_3d
+bic_3d <- -2 * log_likelihoodd_3d + log(n) * d_3d
+
+# Print results
+cat("Lasso Error:", lasso_errord, "\n")
+cat("Elastic Net Error:", mix_errord, "\n")
+cat("Lasso AIC:", aic_1d , "\n")
+cat("Lasso BIC:", bic_1d , "\n")
+cat("Mix AIC:", aic_3d , "\n")
+cat("Mix BIC:", bic_3d , "\n")
+```
+```{r}
+# Load necessary libraries
+library(Matrix)
+library(glmnet)
+library(pROC)
+library(ROCR)
+library(ggplot2)
+
+# Calculate and Plot ROC Curves
+roc_lasso <- roc(y, predictions_1d, quiet = TRUE)
+roc_elastic_net <- roc(y, predictions_3d, quiet = TRUE)
+
+# Plot ROC curves
+plot(roc_lasso, col = "blue", lwd = 2, main = "ROC Curves for Lasso and Elastic Net")
+lines(roc_elastic_net, col = "red", lwd = 2)
+legend("bottomright", legend = c("Lasso", "Elastic Net"),
+       col = c("blue", "red"), lwd = 2)
+
+# Calculate AUC
+auc_lasso <- auc(roc_lasso)
+auc_elastic_net <- auc(roc_elastic_net)
+cat("Lasso AUC:", auc_lasso, "\n")
+cat("Elastic Net AUC:", auc_elastic_net, "\n")
+
+# Calculate Precision and Recall (TPR)
+# Lasso
+pred_lasso <- prediction(predictions_1d, y)
+perf_lasso <- performance(pred_lasso, "prec", "rec")
+precision_lasso <- perf_lasso@y.values[[1]]
+recall_lasso <- perf_lasso@x.values[[1]]
+
+# Elastic Net
+pred_elastic_net <- prediction(predictions_3d, y)
+perf_elastic_net <- performance(pred_elastic_net, "prec", "rec")
+precision_elastic_net <- perf_elastic_net@y.values[[1]]
+recall_elastic_net <- perf_elastic_net@x.values[[1]]
+
+# Combine data for plotting Precision vs TPR
+precision_recall_data <- data.frame(
+  Recall = c(recall_lasso, recall_elastic_net),
+  Precision = c(precision_lasso, precision_elastic_net),
+  Model = rep(c("Lasso", "Elastic Net"), 
+              times = c(length(recall_lasso), length(recall_elastic_net)))
+)
+
+# Plot Precision vs TPR
+ggplot(precision_recall_data, aes(x = Recall, y = Precision, color = Model)) +
+  geom_line(size = 1) +
+  labs(title = "Precision vs TPR for Lasso and Elastic Net",
+       x = "True Positive Rate (Recall)",
+       y = "Precision") +
+  theme_minimal()
+
+```
+
+
+
+*THE FOLLOWING CODE IS THE 1st ITERATION AND CONTAINS VALUABLE INSIGHTS *
 
 Feature selection using regularization - Shrinking the coefficients that are unimportant for predictions 
 which results in some coefficients to become 0.
 ```{r} 
-# Load necessary libraries
-library(Matrix)
-library(glmnet)
-# Convert your features data frame to a sparse matrix for efficiency and easier computations
-#Sparse matrices only store non-zero elements and their positions
 sparse_data <- as(features, "sparseMatrix")
-
-
 # Define your target variable (assuming the target variable is the first column in `data`)
 y <- data[, 1]
 ```
@@ -232,7 +397,7 @@ selected_features_1<- as.matrix(selected_features_1)
 
 # Extract and print only the non-zero coefficients
 selected_features_nonzero_1 <- selected_features_1[selected_features_1 != 0, ]
-print(selected_features_nonzero_1)
+print(selected_features_nonzero_1) # 30 FEATURES
 
 ```
 
@@ -273,9 +438,24 @@ selected_features_3<- as.matrix(selected_features_3)
 #selected_features_nonzero_2 <- selected_features_2[selected_features_2 != 0, ]
 # print(selected_features_nonzero_2)
 selected_features_nonzero_3 <- selected_features_3[selected_features_3 != 0, ]
-print(selected_features_nonzero_3)
+print(selected_features_nonzero_3) # 104 FEATURES
+
+print(sum(selected_features_nonzero_3))
+
+feat <-selected_features_nonzero_3
+selected_feature_names <- names(feat)
+print(selected_feature_names)
+featnames = selected_feature_names[-1]
+# Subset the original dataset to only include the selected features
+selected_features_data <- data[, featnames]
+
+# Calculate the sum for each selected feature
+selected_features_sums <- colSums(selected_features_data)
+
+
 
 ```
+
 ```{r}
 plot(cv_fit_3, xvar="lambda", label= TRUE)
 ```
@@ -291,8 +471,8 @@ mix_error <- min(cv_fit_3$cvm)
 
 
 #We can also compute the AIC and BIC of each model
-log_likelihood <- sum(y * log(predictions_1) + (1 - y) * log(1 - predictions_1))
-log_likelihood <- sum(y * log(predictions_3) + (1 - y) * log(1 - predictions_3))
+log_likelihood_1 <- sum(y * log(predictions_1) + (1 - y) * log(1 - predictions_1))
+log_likelihood_3 <- sum(y * log(predictions_3) + (1 - y) * log(1 - predictions_3))
 
 # Get the number of non-zero coefficients (excluding the intercept)
 d_1<- sum(coef(cv_fit_1, s = "lambda.min") != 0) - 1  # Subtract 1 to exclude intercept
@@ -303,11 +483,11 @@ n <- length(y)
 
 # Calculate AIC and BIC 
 # LASSO
-aic_1 <- -2 * log_likelihood + 2 * d_1
-bic_1 <- -2 * log_likelihood + log(n) * d_1
+aic_1 <- -2 * log_likelihood_1 + 2 * d_1
+bic_1 <- -2 * log_likelihood_1 + log(n) * d_1
 #MIX 
-aic_3 <- -2 * log_likelihood + 2 * d_3
-bic_3<- -2 * log_likelihood + log(n) * d_3
+aic_3 <- -2 * log_likelihood_3 + 2 * d_3
+bic_3<- -2 * log_likelihood_3 + log(n) * d_3
 
 # Print results
 cat("Lasso Error:", lasso_error, "\n")
@@ -320,6 +500,42 @@ cat("Lasso BIC:", bic_1, "\n")
 cat("Mix AIC:", aic_3, "\n")
 cat("Mix BIC:", bic_3, "\n")
 ```
+RESULTS WITH ORIGINAL DATA
+Lasso Error: 0.4069816 
+Elastic Net Error: 0.4079789 
+Lasso AIC: -4026.131 
+Lasso BIC: -3885.593 
+Mix AIC: -3964.915 
+Mix BIC: -3655.731 
+
+RESULTS WITH bind(UNIQUE DATA, 50k ZERO COLUMNS)
+Lasso Error: 0.4024039 
+Elastic Net Error: 0.3843347 
+Lasso AIC: -4028.131 
+Lasso BIC: -3892.277 
+Mix AIC: -4415.336 
+Mix BIC: -3974.983 
+
+RESULTS FOR UNIQUE DATA:
+
+Lasso Error: 0.4121868 
+Elastic Net Error: 0.3839769 
+Lasso AIC: -4084.312 
+Lasso BIC: -3929.72 
+Mix AIC: -4415.336 
+Mix BIC: -3974.983 
+
+RESULTS WHEN GETTING RID OF ONLY ALL ZERO COLUMNS
+
+Lasso Error: 0.4003499 
+Elastic Net Error: 0.3969769 
+Lasso AIC: -4082.313 
+Lasso BIC: -3923.036 
+Mix AIC: -4265.611 
+Mix BIC: -3815.889 
+
+** FINISHED LASSO AND NET ERROR **
+
 This Lasso is the minimum error indicates the best achievable prediction accuracy (under cross-validation) with the Lasso model using the optimal lambda that minimizes error. The model with the lower cross-validated error is typically the better choice for prediction, as it suggests better performance on unseen data.
 
 AIC and BIC are metrics that balance model fit and complexity. Both penalize models with more parameters, with BIC generally penalizing complexity more strongly than AIC.
@@ -334,15 +550,94 @@ Clearly LASSO is the optimal model on our dataset as it has the lowest aic, bic 
 # FOWARD SELECTION
 
 ```{r}
-# Load necessary libraries
 library(Matrix)
 library(glmnet)
 
-# Step 1: Convert features to a sparse matrix
-# sparse_data <- as(as.matrix(data[, -1]), "sparseMatrix")  # Exclude the first column (target)
-# I had to change the data bc I was getting the following error:
-# Error: from glmnet C++ code (error code 7777); All used predictors have zero variance
+# Step 1: Ensure unique_data is prepared
+# Exclude the first column (assumed to be the target) and convert to a sparse matrix
+sparse_data <- as(as.matrix(unique_data[, -1]), "sparseMatrix")
 
+# Preprocess to remove constant features
+non_constant_columns <- apply(sparse_data, 2, function(col) var(col) > 0)
+sparse_data <- sparse_data[, non_constant_columns]
+
+# Define the target variable
+y <- as.factor(unique_data[, 1])  # Assuming the target is in the first column
+y_bin <- ifelse(y == -1, 0, 1)
+
+# Step 2: Forward stepwise feature selection with CV
+set.seed(123)
+n_features <- ncol(sparse_data)
+selected_features <- c()  # Start with no features selected
+remaining_features <- 1:n_features  # Initially, all features are unselected
+best_model <- NULL
+best_cv_error <- Inf  # To track the lowest cross-validated error
+
+# Initialize results
+stepwise_results <- data.frame(step = integer(), added_feature = integer(), cv_error = numeric())
+
+# Perform forward selection for up to 4 features
+for (step in 1:4) {
+  best_feature <- NULL
+  best_error <- Inf
+  
+  for (feature in remaining_features) {
+    # Combine selected features with the current candidate
+    current_features <- c(selected_features, feature)
+    
+    # Perform cross-validated logistic regression
+    model <- cv.glmnet(
+      sparse_data[, current_features, drop = FALSE],
+      y_bin,
+      family = "binomial",
+      alpha = 1,  # Lasso regression
+      nfolds = 5
+    )
+    
+    # Track the error of the best lambda
+    mean_error <- min(model$cvm)
+    
+    # Check if this is the best feature to add
+    if (mean_error < best_error) {
+      best_error <- mean_error
+      best_feature <- feature
+    }
+  }
+  
+  # Update the selected and remaining features
+  selected_features <- c(selected_features, best_feature)
+  remaining_features <- setdiff(remaining_features, best_feature)
+  
+  # Save results
+  stepwise_results <- rbind(stepwise_results, data.frame(
+    step = step,
+    added_feature = best_feature,
+    cv_error = best_error
+  ))
+  
+  # Update the best model
+  if (best_error < best_cv_error) {
+    best_cv_error <- best_error
+    best_model <- model
+  }
+}
+
+# Print stepwise results
+print(stepwise_results)
+
+# Output the final selected features and model
+cat("Selected features:", selected_features, "\n")
+cat("Final CV error:", best_cv_error, "\n")
+
+
+
+```
+
+```{r}
+library(Matrix)
+library(glmnet)
+
+sparse_data <- as(as.matrix(data[, -1]), "sparseMatrix")  # Exclude the first column (target)
 
 # Preprocess to remove constant features
 non_constant_columns <- apply(sparse_data, 2, function(col) var(col) > 0)
@@ -354,60 +649,407 @@ y_bin <- ifelse(y == -1, 0, 1)
 
 # Initialize variables
 n_features <- ncol(sparse_data)
-selected_features <- 3  # Starting with X2
+selected_features <- 2  # Start with X2 (index 2)
 remaining_features <- setdiff(1:n_features, selected_features)
+bic_results <- list()  # To store BIC values for each step
 
 # Forward stepwise selection
 for (step in 1:2) {
-  best_score <- -Inf
+  best_bic <- Inf
   best_feature <- NULL
   
   for (feature in remaining_features) {
     current_features <- c(selected_features, feature)
     x_subset <- sparse_data[, current_features, drop = FALSE]
     
-    # Skip iteration if x_subset contains constant features
-    if (any(apply(x_subset, 2, var) == 0)) next
-    
-    # Fit the model
-    model <- cv.glmnet(
+    # Fit a logistic regression model
+    model <- glmnet(
       x = x_subset,
-      y = y_bin,
+      y = y,
       family = "binomial",
-      alpha = 1,
-      nfolds = 5
+      alpha = 1  # Adjust alpha if needed
     )
     
-    # Evaluate performance
-    score <- max(model$cvm)
-    if (score > best_score) {
-      best_score <- score
+    # Get predictions at lambda.min
+    predictions <- predict(model, newx = x_subset, s = "lambda.min", type = "response")
+    
+    # Compute log-likelihood
+    log_likelihood <- sum(y * log(predictions) + (1 - y) * log(1 - predictions))
+    
+    # Calculate number of non-zero coefficients (excluding intercept)
+    d <- sum(coef(model, s = "lambda.min") != 0) - 1  # Subtract 1 for intercept
+    
+    # Compute BIC
+    n <- length(y)
+    bic <- -2 * log_likelihood + log(n) * d
+    
+    # Update best feature based on BIC
+    if (bic < best_bic) {
+      best_bic <- bic
       best_feature <- feature
     }
   }
   
-  # Add the best feature
+  # Add the best feature to the selected set
   if (!is.null(best_feature)) {
     selected_features <- c(selected_features, best_feature)
     remaining_features <- setdiff(remaining_features, best_feature)
-    cat("Step", step, "- Selected feature:", best_feature, "Score:", best_score, "\n")
+    bic_results[[step]] <- list(
+      selected_features = selected_features,
+      best_feature = best_feature,
+      bic = best_bic
+    )
+    cat("Step", step, "- Selected feature:", best_feature, "BIC:", best_bic, "\n")
   } else {
     cat("No valid features to add at step", step, "\n")
     break
   }
 }
 
-# Step 6: Final model with selected features
-final_features <- selected_features
-final_model <- glmnet(
-  x = sparse_data[, final_features, drop = FALSE],
-  y = y_bin,
-  family = "binomial",
-  alpha = 1
+# Summary of selected features
+cat("Final Selected Features:", selected_features, "\n")
+
+```
+
+
+----------- RANDOM FOREST ---------
+
+```{r}
+library(randomForest)
+library(Matrix)
+library(glmnet)
+set.seed(1)
+features1a <- data1_cleaned[,-1]
+sparse_data1a <- as(features1a, "sparseMatrix")
+
+train_rf <- sample(1:nrow(data1_cleaned),100)
+test_rf <- data1_cleaned[-train_rf,]
+
+print(train_rf)
+
+
+rf_model <- randomForest(label~., data = data1_cleaned, subset = train_rf, importance = TRUE, ntree = 2000, mtry = 200, maxnodes = 25, keep.data = F) 
+# View feature importance
+importance(rf_model)
+
+# Extract importance scores and sort them
+feature_importance <- importance(rf_model)
+sorted_importance <- sort(feature_importance[, 1], decreasing = TRUE)
+
+```
+
+XGBOOST 
+FIRST STEP: Create train and test data.
+
+```{r}
+library(Matrix)
+library(glmnet)
+library(caTools)
+set.seed(1)
+features1a <- unique_data[,-1]
+sparse_data1a <- as(features1a, "sparseMatrix")
+
+data1_cleanedbin <- unique_data
+data1_cleanedbin[, 1] <- ifelse(data1_cleanedbin[, 1] == -1, 0, 1)
+
+splitboost <- sample.split(y,0.8)
+trainboost <- data1_cleanedbin[splitboost,]
+testboost <- data1_cleanedbin[!splitboost,]
+
+```
+
+
+
+```{r}
+# Load the necessary library
+library(xgboost)
+
+
+# Separate the target ('label') and features for both trainboost and testboost
+X_train <- as.matrix(trainboost[, -which(names(trainboost) == "label")])  # Exclude 'label' column for features
+y_train <- as.numeric(trainboost$label)  # Extract the 'label' column as the target
+
+X_test <- as.matrix(testboost[, -which(names(testboost) == "label")])  # Exclude 'label' column for features
+y_test <- as.numeric(testboost$label)  # Extract the 'label' column as the target
+
+# Convert to DMatrix format for XGBoost
+dtrain <- xgb.DMatrix(data = X_train, label = y_train)
+dtest <- xgb.DMatrix(data = X_test, label = y_test)
+```
+
+
+
+```{r}
+library(xgboost)
+
+# Simplified grid for essential parameters
+param_grid <- expand.grid(
+  max_depth = c(4, 6, 8), #tree depth
+  eta = c(0.1, 0.3), #Learning rate F_t+1 = eta * T_t + F_t 
+  subsample = c(0.6, 0.8), #fraction of rows
+  colsample_bytree = c(0.8) #fraction of features
 )
 
-# Summary of selected features
-print(final_features)
+# Track results
+best_model <- NULL
+best_logloss <- Inf
+
+for (i in 1:nrow(param_grid)) {
+  params <- list(
+    booster = "gbtree",
+    objective = "binary:logistic",
+    eval_metric = "logloss",
+    max_depth = param_grid$max_depth[i],
+    eta = param_grid$eta[i],
+    subsample = param_grid$subsample[i],
+    colsample_bytree = param_grid$colsample_bytree[i]
+  )
+  
+  # Cross-validation for current parameters
+  cv <- xgb.cv(
+    params = params,
+    data = dtrain,
+    nrounds = 50,              # Keep this small to limit computation
+    nfold = 5,                 # Stratified 5-fold CV
+    early_stopping_rounds = 10,
+    verbose = FALSE
+  )
+  
+  # Update the best model if logloss improves
+  min_logloss <- min(cv$evaluation_log$test_logloss_mean)
+  if (min_logloss < best_logloss) {
+    best_logloss <- min_logloss
+    best_model <- params
+  }
+}
+# STORE BEST_MODEL PARAMETERS
+
+# Initialize a data frame to store results
+if (!exists("model_results")) {
+  model_results <- data.frame(
+    eta = numeric(),
+    max_depth = integer(),
+    subsample = numeric(),
+    colsample_bytree = numeric(),
+    logloss = numeric(),
+    stringsAsFactors = FALSE
+  )
+}
+
+# Append the best_model parameters and log loss
+model_results <- rbind(
+  model_results,
+  data.frame(
+    eta = best_model$eta,
+    max_depth = best_model$max_depth,
+    subsample = best_model$subsample,
+    colsample_bytree = best_model$colsample_bytree,
+    logloss = best_logloss  # Use the corresponding logloss for the best model
+  )
+)
+
+# Print the updated table
+print(model_results)
+
+
+print(best_model)
+
+
+
+```
+
+```{r}
+# Assuming `best_model` is a list of the optimal parameters found during tuning
+# If you have specific values for the best parameters, replace `best_model` fields directly.
+
+final_params <- list(
+  booster = "gbtree",
+  objective = "binary:logistic",
+  eval_metric = "logloss",
+  eta = best_model$eta,                 # Replace with the optimal eta value
+  max_depth = best_model$max_depth,     # Replace with the optimal max_depth
+  subsample = best_model$subsample,     # Replace with the optimal subsample value
+  colsample_bytree = best_model$colsample_bytree # Replace with optimal colsample_bytree
+)
+
+# Train the model with the optimal parameters
+final_model <- xgb.train(
+  params = final_params, 
+  data = dtrain, 
+  nrounds = 100,                        # You can adjust the number of rounds based on early stopping results
+  watchlist = list(train = dtrain, test = dtest), 
+  early_stopping_rounds = 10,           # Stop training if no improvement is seen in 10 rounds
+  verbose = 0                           # Optional: set to 0 for silent training
+)
+
+# Make predictions on the test data
+final_predictions <- predict(final_model, dtest)
+
+# Convert probabilities to binary predictions (0 or 1)
+final_predictions_binary <- ifelse(final_predictions > 0.5, 1, 0)
+
+# Evaluate the final model
+final_accuracy <- sum(final_predictions_binary == y_test) / length(y_test)
+print(paste("Final Accuracy:", final_accuracy))
+
+# Confusion matrix
+final_conf_matrix <- table(Predicted = final_predictions_binary, Actual = y_test)
+print("Confusion Matrix:")
+print(final_conf_matrix)
+
+
+```
+
+Stopping. Best iteration:
+[18]	train-logloss:0.086565	test-logloss:0.209445
+
+[1] "Final Accuracy: 0.933823529411765"
+[1] "Confusion Matrix:"
+         Actual
+Predicted   0   1
+        0 485  27
+        1   9  23
+
+
+```{r}
+xgb.save(final_model, "xgboost_final_model.model")
+
+
+importance_matrix <- xgb.importance(model = final_model)
+print(importance_matrix)
+
+top_features <- importance_matrix[1:30, ]  # Select the top 30 features
+
+# Plot the top 30 features
+xgb.plot.importance(importance_matrix = top_features, 
+                    main = "Top 30 Most Important Features",
+                    xlab = "Feature Importance")
+
+# xgb.plot.importance(importance_matrix)
+```
+
+
+```{r}
+# Load necessary libraries
+library(ROCR)
+library(ggplot2)
+
+# Generate prediction and performance objects
+pred <- prediction(final_predictions, y_test)  # Using predicted probabilities and true labels
+perf <- performance(pred, "prec", "rec")       # Precision vs Recall (TPR)
+
+# Extract precision and recall (TPR) values
+precision <- perf@y.values[[1]]  # Precision values
+recall <- perf@x.values[[1]]     # Recall (TPR) values
+
+# Create a data frame for plotting
+precision_recall_data <- data.frame(Recall = recall, Precision = precision)
+
+# Plot Precision vs. TPR (Recall)
+ggplot(precision_recall_data, aes(x = Recall, y = Precision)) +
+  geom_line(color = "blue", size = 1) +
+  labs(
+    title = "Precision vs TPR (Recall)",
+    x = "True Positive Rate (Recall)",
+    y = "Precision"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+# Load necessary libraries
+library(pROC)
+
+# Calculate ROC curve and AUC
+roc_curve <- roc(y_test, final_predictions)  # Use true labels and predicted probabilities
+auc_value <- auc(roc_curve)                 # Calculate the AUC value
+
+# Print the AUC value
+print(paste("AUC:", auc_value))
+
+# Plot the ROC curve
+plot(roc_curve, col = "blue", lwd = 2, main = "ROC Curve")
+abline(a = 0, b = 1, col = "red", lty = 2)  # Add a diagonal line for random classifier
+legend("bottomright", legend = paste("AUC =", round(auc_value, 3)), col = "blue", lwd = 2)
+
+```
+
+```{r}
+# Load necessary libraries
+library(Matrix)
+library(glmnet)
+library(pROC)
+library(ROCR)
+library(ggplot2)
+library(xgboost)
+
+# Data preparation
+data1_cleaned <- unique_data
+features1a <- data1_cleaned[, -1]
+sparse_data1a <- as(features1a, "sparseMatrix")
+y <- data[, 1]
+
+# Lasso Model (Alpha = 1)
+cv_fit_lasso <- cv.glmnet(sparse_data1a, y, family = "binomial", alpha = 1)
+predictions_lasso <- predict(cv_fit_lasso, sparse_data1a, s = "lambda.min", type = "response")
+
+# Elastic Net Model (Alpha = 0.5)
+cv_fit_elastic_net <- cv.glmnet(sparse_data1a, y, family = "binomial", alpha = 0.5)
+predictions_elastic_net <- predict(cv_fit_elastic_net, sparse_data1a, s = "lambda.min", type = "response")
+
+predictions_boosting <- final_predictions
+
+# ROC Curves and AUCs
+roc_lasso <- roc(y, predictions_lasso, quiet = TRUE)
+roc_elastic_net <- roc(y, predictions_elastic_net, quiet = TRUE)
+roc_boosting <- roc(y, final_predictions, quiet = TRUE)
+
+auc_lasso <- auc(roc_lasso)
+auc_elastic_net <- auc(roc_elastic_net)
+auc_boosting <- auc(roc_boosting)
+
+# Plot ROC Curves
+plot(roc_lasso, col = "blue", lwd = 2, main = "ROC Curves for Lasso, Elastic Net, and Boosting")
+lines(roc_elastic_net, col = "red", lwd = 2)
+lines(roc_boosting, col = "green", lwd = 2)
+legend("bottomright", legend = c(
+  paste("Lasso (AUC =", round(auc_lasso, 3), ")"),
+  paste("Elastic Net (AUC =", round(auc_elastic_net, 3), ")"),
+  paste("Boosting (AUC =", round(auc_boosting, 3), ")")
+), col = c("blue", "red", "green"), lwd = 2)
+
+# Precision vs TPR (Recall)
+# Prepare predictions and calculate precision/recall for all models
+models <- list(
+  Lasso = predictions_lasso,
+  ElasticNet = predictions_elastic_net,
+  Boosting = predictions_boosting
+)
+
+precision_recall_data <- data.frame()
+
+for (model_name in names(models)) {
+  pred <- prediction(models[[model_name]], y)
+  perf <- performance(pred, "prec", "rec")
+  
+  precision <- perf@y.values[[1]]
+  recall <- perf@x.values[[1]]
+  
+  precision_recall_data <- rbind(precision_recall_data, data.frame(
+    Recall = recall,
+    Precision = precision,
+    Model = model_name
+  ))
+}
+
+# Plot Precision vs TPR
+ggplot(precision_recall_data, aes(x = Recall, y = Precision, color = Model)) +
+  geom_line(size = 1) +
+  labs(title = "Precision vs TPR for Lasso, Elastic Net, and Boosting",
+       x = "True Positive Rate (Recall)",
+       y = "Precision") +
+  theme_minimal()
 
 
 ```
