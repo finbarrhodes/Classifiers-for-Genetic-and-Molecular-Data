@@ -5,20 +5,37 @@ date: "`r Sys.Date()`"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
+```{r setup, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+set.seed(443)
 library(ggplot2)
 library(tidyverse)
+library(MASS)
+library(class)
+library(pROC)
+library(caret) 
+#library(adabag) # For the AdaBoost algorithm
+library(mboost)   # For gamboost
+library (gbm) # Gradient Boosting Machines
+library(xgboost) #Extreme Gradient Boosting
+library(randomForest)
+library(ranger)
+
 ```
 
-## T1.1
-
 ```{r reading in data, echo=TRUE}
-
 task1data <- read.csv("/Users/finbarrhodes/Documents/ST443/Final Project/data1.csv.gz")
+task1data$label <- if_else(task1data$label == "TREG", 1, 0)
+
+```
+
+Here we adjust the *label* column to a factor column, with *TREG* being 0 and *CD4+T*
+```{r label-to-factor}
 table(task1data$label, useNA = "ifany")
 ```
 
+
+## T1.1
 
 ```{r missing data, echo=TRUE}
 
@@ -51,42 +68,196 @@ ggplot(covariate_sparsities, aes(Sparsity)) +
   theme_bw()
 
 ```
-- We might expect to see some variable subset selection to seek a much smaller model than the full one
-
-- In the decision context, we may see a lot of pruning if we look to make large trees
 
 
-```{r Kaan's Work, echo=TRUE}
-#Libraries: ----
-rm(list=ls())
-library(plotly)
 
 
-library(readr); library(dplyr); library(tidyr); library(ggplot2) 
-# you can import do a library called tidyverse which includes all of these I think, it's great.  - Finbar
+
+## T1.2 
+
+```{r functions, echo=TRUE}
+
+eval_metrics <- function(table){
+  # setup
+  TN <- table[[1]]
+  FN <- table[[2]]
+  FP <- table[[3]]
+  TP <- table[[4]]
+  
+  # metrics
+  MER <- (FN + FP) / sum(table)
+  BA <- .5 * (TP / (TP + FN)) + .5 * (TN / (TN + FP))
+  precision <- TP / (TP + FP)
+  recall <- TP / (TP + FN)
+  F1 <- (precision * recall) / (precision + recall)
+  
+  # output
+  return(cat("Misclassification Error Rate:", MER, "\n",
+             "Balanced Accuracy:", BA, "\n", 
+             "F1 Score:", F1, "\n"))
+}
+
+eval_metrics(knn_conf_matrix)
+```
+
+#### LDA
+```{r lda setup, echo=TRUE}
+train <- sample(c(TRUE, FALSE), nrow(task1data), replace=TRUE, prob=c(0.75,0.25))
+test <- !train
+task1_train <- task1data[train,]
+task1_test <- task1data[test,]
+```
 
 
-library(GGally)
-library(DataExplorer)
+```{r lda fit}
+lda_fit <- lda(label ~ ., data = task1data, subset = train)
+```
 
-#EDA: ----
-task1 <- read.csv("data1.csv")
+```{r lda predict}
+lda_pred_full <-  predict(lda_fit, task1_test)
+lda_pred <- predict(lda_fit, task1_test)$class
 
-dim(task1) #Dimension of our data set.
+test_labels <- task1data$label[test]
+lda_conf_matrix <- table(lda_pred, test_labels)
+```
 
-names(task1) #Names of the columns.
 
-summary(task1[1:5]) #Otherwise we have too many entries.
 
-plot_missing(task1[1:5]) #NA Values.
+```{r lda eval, echo=TRUE}
+lda_conf_matrix
 
-plot_bar(task1[1:5]) #To assess the Distribution.
-
-plot_correlation(task1[1:5]) #Heat Map - significant for the classification setting.
-
-ggpairs(data = task1[1:5])
-
+eval_metrics(lda_conf_matrix)
+lda_roc <- roc(task1_test$label, lda_pred_full$posterior[,2], levels = c(0, 1), direction = "<")
+auc(lda_roc)
 
 ```
+
+
+#### Logistic Regression
+```{r logistic regression, echo=TRUE}
+
+logistic_fit <- glm(label ~ ., data = task1data, subset = train, family = binomial)
+logistic_probs <-  predict(logistic_fit, type = "response")
+```
+
+```{r logit eval}
+logistic_pred <-  rep(0, nrow(task1_train))
+logistic_pred[logistic_probs > .5] <-  1
+
+tail(cbind(task1_train$label,logistic_pred))
+logistic_conf_matrix <- table(logistic_pred, task1_train$label)
+eval_metrics(logistic_conf_matrix)
+```
+
+#### QDA
+```{r qda, echo=TRUE}
+
+qda_fit <- qda(label ~ ., data = task1data, subset = train)
+
+```
+
+#### KNN
+```{r knn, echo=TRUE}
+
+knn <- knn(task1_train, task1_test, task1data$label[train], k=1)
+
+knn_conf_matrix <- table(knn, task1data$label[test])
+
+eval_metrics(knn_conf_matrix)
+```
+
+#### GBDT
+
+```{r GBDT}
+
+gbdt <- gbm(label ~ ., data = task1_train, 
+                   distribution = "gaussian", 
+                   n.trees = 1000, 
+                   interaction.depth = 4, 
+                   shrinkage = .001, 
+                   cv.folds = 5, 
+                   verbose = FALSE)
+gbdt_preds <- predict(gbdt, newdata = task1_test, n.trees = 1000)
+
+```
+
+
+#### Random Forest
+
+```{r echo=TRUE}
+
+rf <- ranger(label~., 
+             data = task1_train, 
+             mtry = ncol(task1_train) |> sqrt() |> round(digits = 0),
+             importance = "none",
+             write.forest = TRUE,
+             num.trees = 1000,
+             classification = TRUE,
+             verbose = TRUE)
+
+rf_preds <- predict(rf, data=task1_test)$predictions
+
+mean((rf_preds - task1_test$label)^2)
+
+```
+
+
+
+
+
+
+## T1.3
+
+One classifier to improve upon is Gradient Boosted Decision Trees, namely by tuning the hyperparameters. 
+
+```{r, echo=TRUE}
+# Define grid of lambda (shrinkage) values to evaluate
+lambda_grid <- c(0.001, 0.01,0.03,0.05)
+
+# Initialize a vector to store test errors for each lambda
+test_errors <- numeric(length(lambda_grid))
+```
+
+```{r}
+# Loop over each lambda value
+for (i in seq_along(lambda_grid)) {
+  lambda <- lambda_grid[i]
+  
+  # Train the gbm model with the current lambda (shrinkage) value
+  gbm_model <- gbm(label ~ ., data = task1_train, 
+                   distribution = "gaussian", 
+                   n.trees = 1000, 
+                   interaction.depth = 4, 
+                   shrinkage = lambda, 
+                   cv.folds = 5, 
+                   verbose = FALSE)
+  
+  # Make predictions on the test set using the optimal number of trees
+  predictions <- predict(gbm_model, newdata = task1_test, n.trees = 1000)
+  
+  # Calculate the Mean Squared Error on the test set
+  test_errors[i] <- mean((predictions - task1_test$label)^2)
+}
+```
+
+```{r}
+# Combine lambda values and test errors into a data frame for plotting
+error_df <- data.frame(lambda = lambda_grid, test_error = test_errors)
+
+# Plot the test error over the range of lambda values
+ggplot(error_df, aes(x = lambda, y = test_error)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Test Error vs Lambda (Shrinkage)", 
+       x = "Lambda (Shrinkage)", 
+       y = "Test Mean Squared Error") +
+  theme_minimal()
+```
+
+
+
+
+
+
 
 
