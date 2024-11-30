@@ -19,6 +19,7 @@ library(mboost)   # For gamboost
 library (gbm) # Gradient Boosting Machines
 library(xgboost) #Extreme Gradient Boosting
 library(randomForest)
+library(ranger)
 
 ```
 
@@ -185,13 +186,16 @@ gbdt_preds <- predict(gbdt, newdata = task1_test, n.trees = 1000)
 
 ```{r echo=TRUE}
 
-random_forest <- randomForest(label~., data=task1data, subset=train, 
-                              type = "classification",
-                              mtry=ncol(task1data)/2, 
-                              importance=TRUE, 
-                              n.tree = 5000)
+rf <- ranger(label~., 
+             data = task1_train, 
+             mtry = ncol(task1_train) |> sqrt() |> round(digits = 0),
+             importance = "none",
+             write.forest = TRUE,
+             num.trees = 1000,
+             classification = TRUE,
+             verbose = TRUE)
 
-rf_preds <- predict(random_forest, newdata=task1_test)
+rf_preds <- predict(rf, data=task1_test)$predictions
 
 mean((rf_preds - task1_test$label)^2)
 
