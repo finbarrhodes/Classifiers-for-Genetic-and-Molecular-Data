@@ -23,7 +23,7 @@ Non-binding: Indicates that the compound does not interact effectively with thro
 In the context of drug discovery, thrombin is a protein that could be a target for drugs aimed at affecting blood clotting, and identifying compounds that bind to thrombin can be a critical step in developing new medications.
 
 ```{r}
-# Check for NA values for each column
+set.seed(123)
 na_counts <- sapply(data, function(x) sum(is.na(x)))
 totalna <- sum(na_counts)
 print(totalna)
@@ -33,89 +33,7 @@ print(totalna)
 ```{r}
 # Compare Binding vs Non-binding
 binding_data <- data[data[, 1] == 1, ]
-library(ggplot2)
-ggplot(data, aes(x = data[, 1])) + geom_bar() + labs(x = "Binding Status", y = "Count")
-
-```
-
-
-
-```{r}
-feature_means <- colSums(data[, 2:100001])
-hist(feature_means, breaks = 50, main = "Distribution of Feature Sums", xlab = "Mean of Binary Features")
-
-```
-
-```{r}
-head(data)
-```
-
-
-```{r}
-
-feature_means_nonzero <- feature_means[feature_means == 50]
-
-#hist(feature_means, breaks = 50, main = "Distribution of Feature Means that arent zero", xlab = "Mean of Binary Features")
-
-print(feature_means_nonzero)
-```
-
-```{r}
-data1 <- data
-data2 <- data
-data3 <- data
-data4 <- data
-
-y <- as.factor(data[, 1])  # Convert target variable to a factor if binary
-y_bin <- ifelse(y == -1, 0, 1)
-
-
-```
-
-```{r}
-data <- na.omit(data)
-```
-
-```{r}
-#head(data2)
-
-train_index <- sample(seq_len(nrow(data)), size = 0.5 * nrow(data))
-train_data <- data[train_index, ]
-test_data <- data[-train_index,  ]
-
-y1 <- as.factor(train_data[, 1])  # Convert target variable to a factor if binary
-
-
-
-regfit_fwd <-  regsubsets(y1 ~ .,
-                        data = train_data,
-                        nvmax = 2,
-                        method = "forward",
-                        really.big = TRUE)
-
-summary(regfit_fwd)
-```
-
-
-
-```{r}
-sum(is.na(data2a))      # Check for NA values
-sum(is.nan(as.matrix(data2a)))  # Check for NaN values
-sum(is.infinite(as.matrix(data2a)))  # Check for Inf values
-
-```
-
- ----------- START LANS ------------
-
-```{r}
-head(data)
-```
-
-```{r}
 count <- 0  # Initialize count
-
-
-# Count the amount of binding and non binding Y we have
 for (i in seq_len(nrow(data))) {
   if (data[i, 1] == -1) {
     count <- count + 1
@@ -124,591 +42,175 @@ for (i in seq_len(nrow(data))) {
 
 binding_count = nrow(data) - count
 non_binding_count = count
+print(non_binding_count)
+ggplot(data, aes(x = data[, 1])) + geom_bar() + labs(x = "Binding Status", y = "Count")
+
 ```
 
-```{r, echo=FALSE}
-# Bar plot of proportions in Y
-table(data[[1]])
-
-# Bar plot for binding vs. non-binding compounds
-ggplot(data.frame(Class = data[[1]]), aes(x = factor(Class))) +
-  geom_bar() +
-  labs(title = "Distribution of Binding (1) vs. Non-Binding (0) Compounds",
-       x = "Binding Outcome", y = "Count")
-```
 
 
 ```{r}
-data <- na.omit(data)
+feature_sum <- colSums(data[, 2:100001])
+hist(feature_sum, breaks = 50, main = "Distribution of Feature Sums", xlab = "Sum of binary feature values")
 
-# ------- CHANGING label to binary 0/1 --------
-y <- as.factor(data[, 1])  # Convert target variable to a factor if binary
-
-7885787
 ```
-
 
 ```{r}
-# Calculate the proportion of `1`s for each feature
-
-features <- data[, -1]
-feature_proportion <- colMeans(features)
-
-# Calculate variance for each feature
-feature_variance <- apply(features, 2, var)
-
-# Combine proportions and variances into a summary table
-feature_summary <- data.frame(
-  Feature = names(feature_proportion),
-  Proportion_of_Ones = feature_proportion,
-  Variance = feature_variance
-)
-
-# Display the summary statistics
-feature_summary
-
-ggplot(feature_summary, aes(x = Proportion_of_Ones)) +
-  geom_histogram(binwidth = 0.01, fill = "skyblue", color = "black") +
-  labs(title = "Distribution of Proportion of `1`s Across Features",
-       x = "Proportion of `1`s", y = "Count of Features")
+head(data)
 ```
+
+```{r}
+# Iterate through label and make them 0 if they are -1, 1 otherwise
+for (i in 1:nrow(data)) {
+  if (data[i, 1] == -1) {
+    data[i, 1] <- 0  
+  } else {
+    data[i, 1] <- 1
+  }
+}
+```
+
 
 ```{r}
 # Find duplicate columns
 unique_data <- data[, !duplicated(as.list(data))]
 num_repeated <- ncol(data) - ncol(unique_data)
+cat("The new dataset has dimensions:", dim(unique_data), "\n")
 
-# Output unique dataset and count of repeated columns
-cat("Number of repeated columns removed:", num_repeated, "\n")
+# Use 80% of the data for training
+end_training <- floor(nrow(unique_data) * 0.8)
 
-# ADDING ZERO COLUMNS 
-if (nrow(unique_data) != 800) {
-  stop("The dataset 'unique_data' must have exactly 800 rows.")
-}
-
-# Create a data frame with 50,000 columns filled with zeros
-zero_columns <- as.data.frame(matrix(0, nrow = 800, ncol = 50000))
-
-# Assign column names to the zero_columns
-colnames(zero_columns) <- paste0("zero_col_", seq_len(50000))
-
-# Append the zero columns to unique_data
-unique_data_with_zeros <- cbind(unique_data, zero_columns)
-
-# Print dimensions of the new dataset
-cat("The new dataset has dimensions:", dim(unique_data_with_zeros), "\n")
-
+# Split the data into training and testing sets
+training_data <- unique_data[1:end_training, ] 
+testing_data <- unique_data[(end_training + 1):nrow(unique_data), ]
+print(dim(training_data))
+print(dim(testing_data))
 
 ```
-
-# ---------- GERVA -----------
 
 
 Lets run Lasso with the unique dataset
 ```{r}
 library(Matrix)
 library(glmnet)
-# This is for testing to add 50k Zero Columns
-#data1_cleaned <- unique_data_with_zeros 
 
-data1_cleaned <- unique_data
-features1a <- data1_cleaned[,-1]
-sparse_data1a <- as(features1a, "sparseMatrix")
-y <- data[, 1]
+#create dep. var
+y_train <- training_data[,1]
+y_true <- testing_data[,1]
 
-fit_data1 <- glmnet(sparse_data1a, y, family = "binomial", alpha = 1)  # Lasso regularization
+#create traing and testing matrix with ind.var
+features_train <- training_data[,-1]
+sparse_data_train <- as(features_train, "sparseMatrix")
+
+features_test<- testing_data[,-1]
+sparse_data_test <- as(features_test, "sparseMatrix")
+
 
 #LASSO CLEAN
-cv_fit_1d <- cv.glmnet(sparse_data1a, y, family = "binomial", parallel = TRUE, alpha= 1)
-predictions_1d <- predict(cv_fit_1d, sparse_data1a, s = "lambda.min", type = "response")
+cv_fit_1d <- cv.glmnet(sparse_data_train, y_train, family = "binomial", parallel = TRUE, alpha= 1)
 selected_features_1d <- coef(cv_fit_1d, s = "lambda.min")
 selected_features_1d<- as.matrix(selected_features_1d)
 selected_features_nonzero_1d <- selected_features_1d[selected_features_1d != 0, ]
 cat("There are a total of ",length(selected_features_nonzero_1d)," features according to LASSO in unique dataset","\n")
 print(selected_features_nonzero_1d) 
 
-#MIX CLEAN
-cv_fit_3d <- cv.glmnet(sparse_data1a, y, family = "binomial", parallel = TRUE, alpha= 1/2)
-predictions_3d <- predict(cv_fit_3d, sparse_data1a, s = "lambda.min", type = "response")
+
+#Elastic Net CLEAN
+cv_fit_3d <- cv.glmnet(sparse_data_train, y_train, family = "binomial", parallel = TRUE, alpha= 1/2)
 selected_features_3d <- coef(cv_fit_3d, s = "lambda.min")
 selected_features_3d<- as.matrix(selected_features_3d)
 selected_features_nonzero_3d <- selected_features_3d[selected_features_3d != 0, ]
-cat("There are a total of ",length(selected_features_nonzero_3d)," features according to LASSO in unique dataset","\n")
-print(selected_features_nonzero_3d) 
-
-
-################ FEATURES SELECTED BY LASSO AND NET ELASTIC ################
-
+cat("There are a total of ",length(selected_features_nonzero_3d)," features according to Elastic Net in unique dataset","\n")
+print(selected_features_nonzero_3d)
 ```
-LASSO Comparison between unique data and Original Data:
+Plot the choice of lamda
 ```{r}
-# The outcome is not exactly the same either in features or in coefficients.
-a <- sort(selected_features_nonzero_1d, decreasing = T)
-print(a)
-b <- sort(selected_features_nonzero_1, decreasing = T)
-print(b)
-```
-
-```{r}
-plot(cv_fit_3, xvar="lambda", label= TRUE)
+## plot of the solution path, i.e. estimated coefficients vs log (lambda), where lambda is the tuning parameter
+plot(cv_fit_1d, xvar="lambda", label= TRUE)
+plot(cv_fit_3d, xvar="lambda", label= TRUE)
 ```
 I commented the ridge regression out of the code because it keeps all the features and just makes the coefficeints smaller while the other models actually removes features by shrinking they coefficeints to 0.
 
 
-We can test on how well the 2 model perform top choose the best: ***WITH UNIQUE DATA***
+Because we have unbalanced data instead of using the normal ROC and AUC we use the PR ROC and PR AUC
+```{r} 
+
+library(PRROC)
+
+# Calculate PR AUC for predictions_1d (Lasso)
+predictions_1d <- predict(cv_fit_1d, sparse_data_test, s = "lambda.min", type = "response") #unseen data prediction
+pr_1d <- pr.curve(scores.class0 = predictions_1d, weights.class0 = y_test, curve = TRUE)
+cat("PR AUC (Lasso):", pr_1d$auc.integral, "\n")
+
+# Calculate PR AUC for predictions_3d (Elastic Net)
+predictions_3d <- predict(cv_fit_3d, sparse_data_test, s = "lambda.min", type = "response")
+pr_3d <- pr.curve(scores.class0 = predictions_3d, weights.class0 = y_test, curve = TRUE)
+cat("PR AUC (Elastic Net):", pr_3d$auc.integral, "\n")
+
+
+df_1d <- data.frame(Recall = pr_1d$curve[, 1], Precision = pr_1d$curve[, 2], Threshold = pr_1d$curve[, 3], Model = "Lasso")
+df_3d <- data.frame(Recall = pr_3d$curve[, 1], Precision = pr_3d$curve[, 2], Threshold = pr_3d$curve[, 3], Model = "Elastic Net")
+pr_data <- bind_rows(df_1d, df_3d)
+
+
+# Compute F1 scores for each threshold to find the optimal
+pr_data <- pr_data %>%
+  mutate(F1 = 2 * (Precision * Recall) / (Precision + Recall + 1e-6))  # Add small value to avoid division by zero
+
+# Find optimal threshold for each model (maximizing F1 score)
+optimal_thresholds <- pr_data %>%
+  group_by(Model) %>%
+  filter(F1 == max(F1)) %>%
+  summarize(Optimal_Threshold = Threshold[1], Max_F1 = F1[1])
+
+# Print optimal thresholds
+print(optimal_thresholds)
+
+# Plot Precision-Recall Curves with ggplot2
+ggplot(pr_data, aes(x = Recall, y = Precision, color = Model)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Precision-Recall Curves for Lasso and Elastic Net",
+    x = "Recall",
+    y = "Precision",
+    color = "Model"
+  ) +
+  theme_minimal()
+```
+
+
 ```{r}
-# Compare lasso and Mix, both clean
+# Measure performance on unseen data using the true y
+# Convert probabilities to binary predictions (threshold of 0.5)
+predicted_classes_lasso <- ifelse(predictions_1d > 0.4048683, 1, 0)
+accuracy <- mean(predicted_classes_lasso == y_true)
+cat("The accuracy of Lasso on the test set is:", accuracy, "\n")
+
+predicted_classes_EN <- ifelse(predictions_3d > 0.4200326, 1, 0) #
+accuracy <- mean(predicted_classes_EN == y_true)
+cat("The accuracy of Elastic Net on the test set is:", accuracy, "\n")
+
+```
+We tuned the parameters of each moddel such that it uses thye optimal threshold and we obatain the same accracy but 
+we get abigger AUC 
+
+We can test on how well the 2 model perform top choose the best: 
+```{r}
+# Cross validation errors when we training the models
 lasso_errord <- min(cv_fit_1d$cvm)
 mix_errord <- min(cv_fit_3d$cvm)
 
-#We can also compute the AIC and BIC of each model
-log_likelihoodd_1d <- sum(y * log(predictions_1d) + (1 - y) * log(1 - predictions_1d))
-log_likelihoodd_3d <- sum(y * log(predictions_3d) + (1 - y) * log(1 - predictions_3d))
-d_1d<- sum(coef(cv_fit_1d, s = "lambda.min") != 0) - 1  # Subtract 1 to exclude intercept
-d_3d<- sum(coef(cv_fit_3d, s = "lambda.min") != 0) - 1  # Subtract 1 to exclude intercept
-
-n <- length(y)
-
-# Calculate AIC and BIC 
-# LASSO
-aic_1d <- -2 * log_likelihoodd_1d + 2 * d_1d
-bic_1d <- -2 * log_likelihoodd_1d + log(n) * d_1d
-#MIX 
-aic_3d <- -2 * log_likelihoodd_3d + 2 * d_3d
-bic_3d <- -2 * log_likelihoodd_3d + log(n) * d_3d
-
-# Print results
-cat("Lasso Error:", lasso_errord, "\n")
-cat("Elastic Net Error:", mix_errord, "\n")
-cat("Lasso AIC:", aic_1d , "\n")
-cat("Lasso BIC:", bic_1d , "\n")
-cat("Mix AIC:", aic_3d , "\n")
-cat("Mix BIC:", bic_3d , "\n")
+cat("Lasso CV Error:", lasso_errord, "\n")
+cat("Elastic CV Net Error:", mix_errord, "\n")
 ```
 ```{r}
-# Load necessary libraries
-library(Matrix)
-library(glmnet)
-library(pROC)
-library(ROCR)
-library(ggplot2)
-
-# Calculate and Plot ROC Curves
-roc_lasso <- roc(y, predictions_1d, quiet = TRUE)
-roc_elastic_net <- roc(y, predictions_3d, quiet = TRUE)
-
-# Plot ROC curves
-plot(roc_lasso, col = "blue", lwd = 2, main = "ROC Curves for Lasso and Elastic Net")
-lines(roc_elastic_net, col = "red", lwd = 2)
-legend("bottomright", legend = c("Lasso", "Elastic Net"),
-       col = c("blue", "red"), lwd = 2)
-
-# Calculate AUC
-auc_lasso <- auc(roc_lasso)
-auc_elastic_net <- auc(roc_elastic_net)
-cat("Lasso AUC:", auc_lasso, "\n")
-cat("Elastic Net AUC:", auc_elastic_net, "\n")
-
-# Calculate Precision and Recall (TPR)
-# Lasso
-pred_lasso <- prediction(predictions_1d, y)
-perf_lasso <- performance(pred_lasso, "prec", "rec")
-precision_lasso <- perf_lasso@y.values[[1]]
-recall_lasso <- perf_lasso@x.values[[1]]
-
-# Elastic Net
-pred_elastic_net <- prediction(predictions_3d, y)
-perf_elastic_net <- performance(pred_elastic_net, "prec", "rec")
-precision_elastic_net <- perf_elastic_net@y.values[[1]]
-recall_elastic_net <- perf_elastic_net@x.values[[1]]
-
-# Combine data for plotting Precision vs TPR
-precision_recall_data <- data.frame(
-  Recall = c(recall_lasso, recall_elastic_net),
-  Precision = c(precision_lasso, precision_elastic_net),
-  Model = rep(c("Lasso", "Elastic Net"), 
-              times = c(length(recall_lasso), length(recall_elastic_net)))
-)
-
-# Plot Precision vs TPR
-ggplot(precision_recall_data, aes(x = Recall, y = Precision, color = Model)) +
-  geom_line(size = 1) +
-  labs(title = "Precision vs TPR for Lasso and Elastic Net",
-       x = "True Positive Rate (Recall)",
-       y = "Precision") +
-  theme_minimal()
-
-```
-
-
-
-*THE FOLLOWING CODE IS THE 1st ITERATION AND CONTAINS VALUABLE INSIGHTS *
-
-Feature selection using regularization - Shrinking the coefficients that are unimportant for predictions 
-which results in some coefficients to become 0.
-```{r} 
-sparse_data <- as(features, "sparseMatrix")
-# Define your target variable (assuming the target variable is the first column in `data`)
-y <- data[, 1]
-```
-
-
-glmnet:
-Fits a generalized linear model using a regularization path (either Lasso, Ridge, or Elastic Net) for a range of lambda values.
-Does not perform cross-validation; it fits the model for a specified sequence of lambda values, allowing you to examine the entire regularization path.
-Useful for examining the effect of lambda on the coefficients (solution path) without determining an optimal value for lambda.
-Example use case: Exploring how the coefficients vary as the regularization strength changes across different lambda values.
-```{r}
-# Fit a regularized logistic regression model using glmnet
-# Lasso (alpha = 1), Ridge (alpha = 0), or Elastic Net (alpha = 0.5)
-fit_1 <- glmnet(sparse_data, y, family = "binomial", alpha = 1)  # Lasso regularization
-
-plot(fit_1, xvar="lambda", label= TRUE)
-```
-
-
-cv.glmnet:
-Builds on glmnet by adding cross-validation to determine the best lambda for model performance.
-Automatically performs k-fold cross-validation (default is 10-fold) to find the lambda that minimizes cross-validated error.
-Provides two optimal values:
-lambda.min: The value of lambda that gives the minimum cross-validation error.
-lambda.1se: The largest lambda within one standard error of lambda.min, offering a more regularized (simpler) model.
-Example use case: Selecting an optimal lambda value based on cross-validation.
-
-```{r}
-# Fit a regularized logistic regression model using glmnet with cross-validation
-# Regularisation using either LASSO when alpha=1, RIDGE REGRESSION when alpha= 0, Mix of LASSO and RIDGE alpha= 1/2
-
-#LASS0
-cv_fit_1 <- cv.glmnet(sparse_data, y, family = "binomial", parallel = TRUE, alpha= 1)
-
-# Display the best lambda value (regularization parameter)
-best_lambda_1 <- cv_fit_1$lambda.min
-print(best_lambda_1)
-
-# To make predictions with the model
-predictions_1 <- predict(cv_fit_1, sparse_data, s = "lambda.min", type = "response")
-
-# Get the coefficients of the selected features
-selected_features_1 <- coef(cv_fit_1, s = "lambda.min")
-
-# Convert to a standard matrix to make subsetting easier
-selected_features_1<- as.matrix(selected_features_1)
-
-# Extract and print only the non-zero coefficients
-selected_features_nonzero_1 <- selected_features_1[selected_features_1 != 0, ]
-print(selected_features_nonzero_1) # 30 FEATURES
-
-```
-
-
-```{r}
-## plot of the solution path, i.e. estimated coefficients vs log (lambda), where lambda is the tuning parameter
-plot(cv_fit_1, xvar="lambda", label= TRUE)
-```
-The dashed lines point to:
-The 𝜆 with the lowest MSE
-The 𝜆with MSE less than one standard deviation away from the minimum MSE.
-
-
-
-We can do the same for the Ridge regression and the mix of Ridge and Mix regression
-```{r} 
-#RIDGE REGRESSION
-
-#cv_fit_2<- cv.glmnet(sparse_data, y, family = "binomial", parallel = TRUE, alpha= 0)
-#LASSO + RIDGE REGRESSION
-cv_fit_3<- cv.glmnet(sparse_data, y, family = "binomial", parallel = TRUE, alpha= 1/2)
-
-
-#best_lambda_2 <- cv_fit_2$lambda.min
-#print(best_lambda_2)
-best_lambda_3 <- cv_fit_3$lambda.min
-print(best_lambda_3)
-
-#predictions_2 <- predict(cv_fit_2, sparse_data, s = "lambda.min", type = "response")
-predictions_3 <- predict(cv_fit_3, sparse_data, s = "lambda.min", type = "response")
-
-#selected_features_2 <- coef(cv_fit_2, s = "lambda.min")
-selected_features_3 <- coef(cv_fit_3, s = "lambda.min")
-
-#selected_features_2<- as.matrix(selected_features_2)
-selected_features_3<- as.matrix(selected_features_3)
-
-#selected_features_nonzero_2 <- selected_features_2[selected_features_2 != 0, ]
-# print(selected_features_nonzero_2)
-selected_features_nonzero_3 <- selected_features_3[selected_features_3 != 0, ]
-print(selected_features_nonzero_3) # 104 FEATURES
-
-print(sum(selected_features_nonzero_3))
-
-feat <-selected_features_nonzero_3
-selected_feature_names <- names(feat)
-print(selected_feature_names)
-featnames = selected_feature_names[-1]
-# Subset the original dataset to only include the selected features
-selected_features_data <- data[, featnames]
-
-# Calculate the sum for each selected feature
-selected_features_sums <- colSums(selected_features_data)
-
-
-
-```
-
-```{r}
-plot(cv_fit_3, xvar="lambda", label= TRUE)
-```
-I commented the ridge regression out of the code because it keeps all the features and just makes the coefficeints smaller while the other models actually removes features by shrinking they coefficeints to 0.
-
-
-We can test on how well the 2 model perform top choose the best:
-```{r}
-# We can get the cross validation test error of the 3 methods to see which one performs best on our dataset:
-lasso_error <- min(cv_fit_1$cvm)
-#ridge_r_error <- min(cv_fit_2$cvm)
-mix_error <- min(cv_fit_3$cvm)
-
-
-#We can also compute the AIC and BIC of each model
-log_likelihood_1 <- sum(y * log(predictions_1) + (1 - y) * log(1 - predictions_1))
-log_likelihood_3 <- sum(y * log(predictions_3) + (1 - y) * log(1 - predictions_3))
-
-# Get the number of non-zero coefficients (excluding the intercept)
-d_1<- sum(coef(cv_fit_1, s = "lambda.min") != 0) - 1  # Subtract 1 to exclude intercept
-d_3<- sum(coef(cv_fit_3, s = "lambda.min") != 0) - 1  # Subtract 1 to exclude intercept
-
-# Number of observations
-n <- length(y)
-
-# Calculate AIC and BIC 
-# LASSO
-aic_1 <- -2 * log_likelihood_1 + 2 * d_1
-bic_1 <- -2 * log_likelihood_1 + log(n) * d_1
-#MIX 
-aic_3 <- -2 * log_likelihood_3 + 2 * d_3
-bic_3<- -2 * log_likelihood_3 + log(n) * d_3
-
-# Print results
-cat("Lasso Error:", lasso_error, "\n")
-#cat("Ridge Error:", ridge_r_error, "\n")
-cat("Elastic Net Error:", mix_error, "\n")
-
-
-cat("Lasso AIC:", aic_1, "\n")
-cat("Lasso BIC:", bic_1, "\n")
-cat("Mix AIC:", aic_3, "\n")
-cat("Mix BIC:", bic_3, "\n")
-```
-RESULTS WITH ORIGINAL DATA
-Lasso Error: 0.4069816 
-Elastic Net Error: 0.4079789 
-Lasso AIC: -4026.131 
-Lasso BIC: -3885.593 
-Mix AIC: -3964.915 
-Mix BIC: -3655.731 
-
-RESULTS WITH bind(UNIQUE DATA, 50k ZERO COLUMNS)
-Lasso Error: 0.4024039 
-Elastic Net Error: 0.3843347 
-Lasso AIC: -4028.131 
-Lasso BIC: -3892.277 
-Mix AIC: -4415.336 
-Mix BIC: -3974.983 
-
-RESULTS FOR UNIQUE DATA:
-
-Lasso Error: 0.4121868 
-Elastic Net Error: 0.3839769 
-Lasso AIC: -4084.312 
-Lasso BIC: -3929.72 
-Mix AIC: -4415.336 
-Mix BIC: -3974.983 
-
-RESULTS WHEN GETTING RID OF ONLY ALL ZERO COLUMNS
-
-Lasso Error: 0.4003499 
-Elastic Net Error: 0.3969769 
-Lasso AIC: -4082.313 
-Lasso BIC: -3923.036 
-Mix AIC: -4265.611 
-Mix BIC: -3815.889 
-
-** FINISHED LASSO AND NET ERROR **
-
-This Lasso is the minimum error indicates the best achievable prediction accuracy (under cross-validation) with the Lasso model using the optimal lambda that minimizes error. The model with the lower cross-validated error is typically the better choice for prediction, as it suggests better performance on unseen data.
-
-AIC and BIC are metrics that balance model fit and complexity. Both penalize models with more parameters, with BIC generally penalizing complexity more strongly than AIC.
-
-Clearly LASSO is the optimal model on our dataset as it has the lowest aic, bic and test error.
-
-
------------ FINISH LANS ------------
-
-### After using regularization for feature selction we will now use Stepwise methodes:
-
-# FOWARD SELECTION
-
-```{r}
-library(Matrix)
-library(glmnet)
-
-# Step 1: Ensure unique_data is prepared
-# Exclude the first column (assumed to be the target) and convert to a sparse matrix
-sparse_data <- as(as.matrix(unique_data[, -1]), "sparseMatrix")
-
-# Preprocess to remove constant features
-non_constant_columns <- apply(sparse_data, 2, function(col) var(col) > 0)
-sparse_data <- sparse_data[, non_constant_columns]
-
-# Define the target variable
-y <- as.factor(unique_data[, 1])  # Assuming the target is in the first column
-y_bin <- ifelse(y == -1, 0, 1)
-
-# Step 2: Forward stepwise feature selection with CV
-set.seed(123)
-n_features <- ncol(sparse_data)
-selected_features <- c()  # Start with no features selected
-remaining_features <- 1:n_features  # Initially, all features are unselected
-best_model <- NULL
-best_cv_error <- Inf  # To track the lowest cross-validated error
-
-# Initialize results
-stepwise_results <- data.frame(step = integer(), added_feature = integer(), cv_error = numeric())
-
-# Perform forward selection for up to 4 features
-for (step in 1:4) {
-  best_feature <- NULL
-  best_error <- Inf
-  
-  for (feature in remaining_features) {
-    # Combine selected features with the current candidate
-    current_features <- c(selected_features, feature)
-    
-    # Perform cross-validated logistic regression
-    model <- cv.glmnet(
-      sparse_data[, current_features, drop = FALSE],
-      y_bin,
-      family = "binomial",
-      alpha = 1,  # Lasso regression
-      nfolds = 5
-    )
-    
-    # Track the error of the best lambda
-    mean_error <- min(model$cvm)
-    
-    # Check if this is the best feature to add
-    if (mean_error < best_error) {
-      best_error <- mean_error
-      best_feature <- feature
-    }
-  }
-  
-  # Update the selected and remaining features
-  selected_features <- c(selected_features, best_feature)
-  remaining_features <- setdiff(remaining_features, best_feature)
-  
-  # Save results
-  stepwise_results <- rbind(stepwise_results, data.frame(
-    step = step,
-    added_feature = best_feature,
-    cv_error = best_error
-  ))
-  
-  # Update the best model
-  if (best_error < best_cv_error) {
-    best_cv_error <- best_error
-    best_model <- model
-  }
-}
-
-# Print stepwise results
-print(stepwise_results)
-
-# Output the final selected features and model
-cat("Selected features:", selected_features, "\n")
-cat("Final CV error:", best_cv_error, "\n")
-
-
-
-```
-
-```{r}
-library(Matrix)
-library(glmnet)
-
-sparse_data <- as(as.matrix(data[, -1]), "sparseMatrix")  # Exclude the first column (target)
-
-# Preprocess to remove constant features
-non_constant_columns <- apply(sparse_data, 2, function(col) var(col) > 0)
-sparse_data <- sparse_data[, non_constant_columns]
-
-# Step 2: Define your target variable
-y <- as.factor(data[, 1])  # Convert target variable to a factor if binary
-y_bin <- ifelse(y == -1, 0, 1)
-
-# Initialize variables
-n_features <- ncol(sparse_data)
-selected_features <- 2  # Start with X2 (index 2)
-remaining_features <- setdiff(1:n_features, selected_features)
-bic_results <- list()  # To store BIC values for each step
-
-# Forward stepwise selection
-for (step in 1:2) {
-  best_bic <- Inf
-  best_feature <- NULL
-  
-  for (feature in remaining_features) {
-    current_features <- c(selected_features, feature)
-    x_subset <- sparse_data[, current_features, drop = FALSE]
-    
-    # Fit a logistic regression model
-    model <- glmnet(
-      x = x_subset,
-      y = y,
-      family = "binomial",
-      alpha = 1  # Adjust alpha if needed
-    )
-    
-    # Get predictions at lambda.min
-    predictions <- predict(model, newx = x_subset, s = "lambda.min", type = "response")
-    
-    # Compute log-likelihood
-    log_likelihood <- sum(y * log(predictions) + (1 - y) * log(1 - predictions))
-    
-    # Calculate number of non-zero coefficients (excluding intercept)
-    d <- sum(coef(model, s = "lambda.min") != 0) - 1  # Subtract 1 for intercept
-    
-    # Compute BIC
-    n <- length(y)
-    bic <- -2 * log_likelihood + log(n) * d
-    
-    # Update best feature based on BIC
-    if (bic < best_bic) {
-      best_bic <- bic
-      best_feature <- feature
-    }
-  }
-  
-  # Add the best feature to the selected set
-  if (!is.null(best_feature)) {
-    selected_features <- c(selected_features, best_feature)
-    remaining_features <- setdiff(remaining_features, best_feature)
-    bic_results[[step]] <- list(
-      selected_features = selected_features,
-      best_feature = best_feature,
-      bic = best_bic
-    )
-    cat("Step", step, "- Selected feature:", best_feature, "BIC:", best_bic, "\n")
-  } else {
-    cat("No valid features to add at step", step, "\n")
-    break
-  }
-}
-
-# Summary of selected features
-cat("Final Selected Features:", selected_features, "\n")
-
+conf_matrix_lasso <- table(Predicted = predicted_classes_lasso, Actual = y_test)
+print("Confusion Matrix Lasso:")
+print(conf_matrix_lasso)
+
+conf_matrix_EN <- table(Predicted =  predicted_classes_EN , Actual = y_test)
+print("Confusion Matrix Elastic:")
+print(conf_matrix_EN)
 ```
 
 
