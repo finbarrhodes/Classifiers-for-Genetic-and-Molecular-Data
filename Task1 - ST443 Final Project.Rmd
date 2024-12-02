@@ -20,7 +20,8 @@ library (gbm) # Gradient Boosting Machines
 library(xgboost) #Extreme Gradient Boosting
 library(randomForest)
 library(ranger)
-
+library(e1071)
+library(lattice)
 ```
 
 ```{r reading in data, echo=TRUE}
@@ -29,7 +30,7 @@ task1data$label <- if_else(task1data$label == "TREG", 1, 0)
 
 ```
 
-Here we adjust the *label* column to a factor column, with *TREG* being 0 and *CD4+T*
+Here we adjust the *label* column to a factor column, with *TREG* being 1 and *CD4+T* being 0
 ```{r label-to-factor}
 table(task1data$label, useNA = "ifany")
 ```
@@ -67,17 +68,28 @@ ggplot(covariate_sparsities, aes(Sparsity)) +
   ggtitle("Distribution of Sparsity Rates Across Covariates") + 
   theme_bw()
 
+
+barplot(colMeans(task1data[2:ncol(task1data)]))
+
 ```
+can ask the question if all features are truly of use
+
+```{r heatmap}
+
+task1matrix <- sapply(task1data, as.numeric) |> as.matrix()
+
+pal <- colorRampPalette(c("red", "yellow"), space = "rgb") 
+levelplot(task1matrix, main="Task 1 Data Heatmap", xlab=" ", ylab=" ", col.regions=pal(40), cuts=3, at=seq(0,1,0.5))#, useRaster = TRUE)
 
 
-
+```
 
 
 ## T1.2 
 
 ```{r functions, echo=TRUE}
 
-eval_metrics <- function(method, table){
+eval_metrics <- function(str, table){
   # setup
   TN <- table[[1]]
   FN <- table[[2]]
@@ -92,7 +104,7 @@ eval_metrics <- function(method, table){
   F1 <- (precision * recall) / (precision + recall)
   
   # output
-  return(data.frame("Method" = method,
+  return(data.frame("Method" = str,
                     "Accuracy" = accuracy,
                     "Balanced Accuracy" = BA,
                     "F1" = F1))
@@ -111,6 +123,7 @@ train <- sample(c(TRUE, FALSE), nrow(task1data), replace=TRUE, prob=c(0.75,0.25)
 test <- !train
 task1_train <- task1data[train,]
 task1_test <- task1data[test,]
+
 ```
 
 
@@ -131,9 +144,7 @@ lda_conf_matrix <- table(lda_pred, test_labels)
 ```{r lda eval, echo=TRUE}
 lda_conf_matrix
 
-eval_metrics(lda_conf_matrix)
-lda_roc <- roc(task1_test$label, lda_pred_full$posterior[,2], levels = c(0, 1), direction = "<")
-auc(lda_roc)
+eval_metrics(str = "LDA", table = lda_conf_matrix)
 
 ```
 
@@ -141,7 +152,7 @@ auc(lda_roc)
 #### Logistic Regression
 ```{r logistic regression, echo=TRUE}
 
-logistic_fit <- glm(label ~ ., data = task1data, subset = train, family = binomial)
+logistic_fit <- glm(label ~ ., data = task1data, family = binomial)
 logistic_probs <-  predict(logistic_fit, type = "response")
 ```
 
@@ -149,9 +160,9 @@ logistic_probs <-  predict(logistic_fit, type = "response")
 logistic_pred <-  rep(0, nrow(task1_train))
 logistic_pred[logistic_probs > .5] <-  1
 
-tail(cbind(task1_train$label,logistic_pred))
-logistic_conf_matrix <- table(logistic_pred, task1_train$label)
-eval_metrics(logistic_conf_matrix)
+# tail(cbind(task1_train$label,logistic_pred))
+logistic_conf_matrix <- table(logistic_pred, task1data$label)
+eval_metrics("Logisitc Regression", logistic_conf_matrix)
 ```
 
 #### QDA
@@ -181,7 +192,8 @@ gbdt <- gbm(label ~ ., data = task1_train,
                    interaction.depth = 4, 
                    shrinkage = .001, 
                    cv.folds = 5, 
-                   verbose = FALSE)
+                   verbose = TRUE)
+
 gbdt_preds <- predict(gbdt, newdata = task1_test, n.trees = 1000)
 
 ```
@@ -212,7 +224,37 @@ rf_conf_matrix <- table(rf_preds, task1data$label[test])
 
 
 
+#### SVM
+```{r}
+cost = 10 #This is the regularisation parameter.
+svmfit = svm(label ~ ., data = task1_train, kernel = "linear", cost = cost, scale = FALSE)
+
+svm_predictions <- predict(svm_model, test_data)
+```
+
+## T1.2.PCA 
+
+```{r}
+PCA <- prcomp(x = task1data)
+Table_PCA <- rbind(PCA$rotation, summary(PCA)$importance)
+print(Table_PCA[ ,1:10])
+
+summary(PCA[ ,1:10])
+
+par(mfrow=c(1,1))
+plot(Table_PCA['Proportion of Variance',], type = 'l', lwd = 5, col = 'blue', xlim = c(1,4), main = 'PC proportions of total variance', xlab = 'PC', ylab = 'Proportion of variance', axes = FALSE)
+axis(1, 1:10)
+axis(2)
+```
+
+
+
 ## T1.3
+
+Classifiers to tweak:
+- KNN
+- GBTM
+- 
 
 One classifier to improve upon is Gradient Boosted Decision Trees, namely by tuning the hyperparameters. 
 
@@ -269,6 +311,14 @@ summary_table <- rbind(eval_metrics("LDA", lda_conf_matrix),
                        eval_metrics("Logistic Regression", logistic_conf_matrix),
                        eval_metrics("KNN", knn_conf_matrix),
                        eval_metrics("Random Forest", rf_conf_matrix))
+
+#summary_table$AUC <- c(auc(roc(task1_test$label, lda_pred_full$posterior[,2], levels = c(0,1), direction = "<")),
+ #                      auc(roc(task1_test$label, lda_pred_full$posterior[,2], levels = c(0,1), direction = "<")),
+  #                     auc(roc(task1_test$label, lda_pred_full$posterior[,2], levels = c(0,1), direction = "<")),
+   #                    auc(roc(task1_test$label, lda_pred_full$posterior[,2], levels = c(0,1), direction = "<")))
+  
+lda_roc <- roc(task1_test$label, lda_pred_full$posterior[,2], levels = c(0, 1), direction = "<")
+auc(lda_roc)
 
 
 ```
