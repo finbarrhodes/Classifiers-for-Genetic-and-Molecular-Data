@@ -18,8 +18,8 @@ library(ISLR)
 data <- read.csv("data2.csv.gz")
 ```
 
-Binding: Indicates that the compound interacts or attaches effectively to the thrombin target site.
-Non-binding: Indicates that the compound does not interact effectively with thrombin.
+Binding: Indicates that the compound interacts or attaches effectively to the thrombin target site.(1)
+Non-binding: Indicates that the compound does not interact effectively with thrombin.(0)
 In the context of drug discovery, thrombin is a protein that could be a target for drugs aimed at affecting blood clotting, and identifying compounds that bind to thrombin can be a critical step in developing new medications.
 
 ```{r}
@@ -68,6 +68,7 @@ for (i in 1:nrow(data)) {
     data[i, 1] <- 1
   }
 }
+print(data)
 ```
 
 
@@ -76,10 +77,12 @@ for (i in 1:nrow(data)) {
 unique_data <- data[, !duplicated(as.list(data))]
 num_repeated <- ncol(data) - ncol(unique_data)
 cat("The new dataset has dimensions:", dim(unique_data), "\n")
+```
 
+To compare our models we mesure their performance on unseen data. So we split the dataset in training and test
+```{r}
 # Use 80% of the data for training
 end_training <- floor(nrow(unique_data) * 0.8)
-
 # Split the data into training and testing sets
 training_data <- unique_data[1:end_training, ] 
 testing_data <- unique_data[(end_training + 1):nrow(unique_data), ]
@@ -89,7 +92,7 @@ print(dim(testing_data))
 ```
 
 
-Lets run Lasso with the unique dataset
+Lets build Lasso and Elastic Net with the training data
 ```{r}
 library(Matrix)
 library(glmnet)
@@ -98,7 +101,7 @@ library(glmnet)
 y_train <- training_data[,1]
 y_true <- testing_data[,1]
 
-#create traing and testing matrix with ind.var
+#create training and testing matrix with ind.var
 features_train <- training_data[,-1]
 sparse_data_train <- as(features_train, "sparseMatrix")
 
@@ -112,9 +115,11 @@ selected_features_1d <- coef(cv_fit_1d, s = "lambda.min")
 selected_features_1d<- as.matrix(selected_features_1d)
 selected_features_nonzero_1d <- selected_features_1d[selected_features_1d != 0, ]
 cat("There are a total of ",length(selected_features_nonzero_1d)," features according to LASSO in unique dataset","\n")
-print(selected_features_nonzero_1d) 
+print(selected_features_nonzero_1d)
+```
 
 
+```{r}
 #Elastic Net CLEAN
 cv_fit_3d <- cv.glmnet(sparse_data_train, y_train, family = "binomial", parallel = TRUE, alpha= 1/2)
 selected_features_3d <- coef(cv_fit_3d, s = "lambda.min")
@@ -131,12 +136,11 @@ plot(cv_fit_3d, xvar="lambda", label= TRUE)
 ```
 I commented the ridge regression out of the code because it keeps all the features and just makes the coefficeints smaller while the other models actually removes features by shrinking they coefficeints to 0.
 
-
+Now we us the models on unseen data to predict the labels and evaluate the performance
 Because we have unbalanced data instead of using the normal ROC and AUC we use the PR ROC and PR AUC
 ```{r} 
 
 library(PRROC)
-
 # Calculate PR AUC for predictions_1d (Lasso)
 predictions_1d <- predict(cv_fit_1d, sparse_data_test, s = "lambda.min", type = "response") #unseen data prediction
 pr_1d <- pr.curve(scores.class0 = predictions_1d, weights.class0 = y_test, curve = TRUE)
@@ -181,12 +185,12 @@ ggplot(pr_data, aes(x = Recall, y = Precision, color = Model)) +
 
 ```{r}
 # Measure performance on unseen data using the true y
-# Convert probabilities to binary predictions (threshold of 0.5)
+# Convert probabilities to binary predictions using the optimal threshold for each model (tuning thew parameters)
 predicted_classes_lasso <- ifelse(predictions_1d > 0.4048683, 1, 0)
 accuracy <- mean(predicted_classes_lasso == y_true)
 cat("The accuracy of Lasso on the test set is:", accuracy, "\n")
 
-predicted_classes_EN <- ifelse(predictions_3d > 0.4200326, 1, 0) #
+predicted_classes_EN <- ifelse(predictions_3d > 0.2443623, 1, 0) #
 accuracy <- mean(predicted_classes_EN == y_true)
 cat("The accuracy of Elastic Net on the test set is:", accuracy, "\n")
 
@@ -218,21 +222,14 @@ print(conf_matrix_EN)
 
 ```{r}
 library(randomForest)
-library(Matrix)
-library(glmnet)
-set.seed(1)
-features1a <- data1_cleaned[,-1]
-sparse_data1a <- as(features1a, "sparseMatrix")
+library(ranger)
 
-train_rf <- sample(1:nrow(data1_cleaned),100)
-test_rf <- data1_cleaned[-train_rf,]
+# Reduce feature size or sample size if needed
+selected_features <- c("feature1", "feature2", "y_train")
+training_subset <- training_data[sample(1:nrow(training_data), size = 0.5 * nrow(training_data)), selected_features]
 
-print(train_rf)
-
-
-rf_model <- randomForest(label~., data = data1_cleaned, subset = train_rf, importance = TRUE, ntree = 2000, mtry = 200, maxnodes = 25, keep.data = F) 
-# View feature importance
-importance(rf_model)
+# Train with ranger
+rf_model <- ranger(y_train ~ ., data = training_subset, num.trees = 100, mtry = 5, max.depth = 20, importance = "impurity")
 
 # Extract importance scores and sort them
 feature_importance <- importance(rf_model)
