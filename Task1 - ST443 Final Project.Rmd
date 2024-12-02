@@ -152,17 +152,17 @@ eval_metrics(str = "LDA", table = lda_conf_matrix)
 #### Logistic Regression
 ```{r logistic regression, echo=TRUE}
 
-logistic_fit <- glm(label ~ ., data = task1data, family = binomial)
-logistic_probs <-  predict(logistic_fit, type = "response")
+logistic_fit <- glm(label ~ ., data = task1data, subset = train, family = binomial)
+logistic_probs <-  predict(logistic_fit, newdata = task1_test, type = "response")
 ```
 
 ```{r logit eval}
-logistic_pred <-  rep(0, nrow(task1_train))
+logistic_pred <-  rep(0, nrow(task1_test))
 logistic_pred[logistic_probs > .5] <-  1
 
 # tail(cbind(task1_train$label,logistic_pred))
-logistic_conf_matrix <- table(logistic_pred, task1data$label)
-eval_metrics("Logisitc Regression", logistic_conf_matrix)
+logistic_conf_matrix <- table(logistic_pred, task1_test$label)
+eval_metrics(str = "Logisitc Regression", table = logistic_conf_matrix)
 ```
 
 #### QDA
