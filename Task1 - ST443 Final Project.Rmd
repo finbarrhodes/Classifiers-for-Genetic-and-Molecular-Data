@@ -87,15 +87,15 @@ levelplot(task1matrix, main="Task 1 Data Heatmap", xlab=" ", ylab=" ", col.regio
 ## T1.2 
 ```{r eval_metrics, echo=TRUE}
 
-eval_metrics <- function(str, table){
+eval_metrics <- function(str, conf){
   # setup
-  TN <- table[[1]]
-  FN <- table[[2]]
-  FP <- table[[3]]
-  TP <- table[[4]]
+  TN <- conf[[1]]
+  FN <- conf[[2]]
+  FP <- conf[[3]]
+  TP <- conf[[4]]
   
   # metrics
-  accuracy <- 1 - ((FN + FP) / sum(table))
+  accuracy <- 1 - ((FN + FP) / sum(conf))
   BA <- .5 * (TP / (TP + FN)) + .5 * (TN / (TN + FP))
   precision <- TP / (TP + FP)
   recall <- TP / (TP + FN)
@@ -141,7 +141,7 @@ lda_conf_matrix <- table(lda_pred, test_labels)
 ```{r lda eval, echo=TRUE}
 lda_conf_matrix
 
-eval_metrics(str = "LDA", table = lda_conf_matrix)
+eval_metrics(str = "LDA", conf = lda_conf_matrix)
 
 ```
 
@@ -159,7 +159,7 @@ logistic_pred[logistic_probs > .5] <-  1
 
 # tail(cbind(task1_train$label,logistic_pred))
 logistic_conf_matrix <- table(logistic_pred, task1_test$label)
-eval_metrics(str = "Logisitc Regression", table = logistic_conf_matrix)
+eval_metrics(str = "Logisitc Regression", conf = logistic_conf_matrix)
 ```
 
 #### QDA
@@ -218,11 +218,6 @@ rf_conf_matrix <- table(rf_preds, task1data$label[test])
 
 
 
-
-
-
-
-
 #### SVM
 ```{r}
 cost = 10 #This is the regularisation parameter.
@@ -235,11 +230,15 @@ svm_predictions <- predict(svmfit, task1_test)
 pca <- prcomp(~., data = task1data[2:ncol(task1data)])
 
 top10 <- pca$rotation[,1:10]
+summary(pca$rotation)[1:10]
+View(pca$x)
+
+
+
 
 table_pca <- rbind(pca$rotation, summary(pca)$importance)
 print(table_pca[ ,1:10])
 
-summary(pca[ ,1:10])
 
 par(mfrow=c(1,1))
 plot(Table_pca['Proportion of Variance',], type = 'l', lwd = 5, col = 'blue', xlim = c(1,4), main = 'PC proportions of total variance', xlab = 'PC', ylab = 'Proportion of variance', axes = FALSE)
@@ -256,9 +255,11 @@ Classifiers to tweak:
 - GBTM
 - Random Forest
 
+#### KNN
+
 In the *k*-Nearest Neighbor classifier, here we are tweaking the main parameter *k*, the number of neighbors taken into account in fitting the model.  
 ```{r knn v2, echo=TRUE}
-knn_metrics <- eval_metrics("1NN", knn_conf_matrix)
+knn_metrics <- eval_metrics(str = "1NN", conf = knn_conf_matrix)
 for (k in 1:10){
   fit <- knn(task1_train, task1_test, task1data$label[train], k=k)
   
@@ -267,9 +268,13 @@ for (k in 1:10){
   rbind(knn_metrics, eval_metrics(cat(k,"NN"), conf_matrix))
 }
 
+knn_metrics
+
 ```
 
-One classifier to improve upon is Gradient Boosted Decision Trees, namely by tuning the hyperparameters. 
+#### GBDT
+
+One classifier to improve upon is Gradient Boosted Decision Trees, namely by tuning the hyperparameter lambda that can be thought of as a shrinkage parameter.
 ```{r, GBTM v2, echo=TRUE}
 # Define grid of lambda (shrinkage) values to evaluate
 lambda_grid <- c(0.001, 0.01,0.03,0.05)
