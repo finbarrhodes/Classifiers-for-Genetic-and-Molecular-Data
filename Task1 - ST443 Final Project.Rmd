@@ -18,10 +18,11 @@ library(caret)
 library(mboost)   # For gamboost
 library (gbm) # Gradient Boosting Machines
 library(xgboost) #Extreme Gradient Boosting
-library(randomForest)
 library(ranger)
 library(e1071)
 library(lattice)
+library(PRROC)
+
 ```
 
 ```{r reading in data, echo=TRUE}
@@ -30,10 +31,10 @@ task1data$label <- if_else(task1data$label == "TREG", 1, 0)
 ```
 
 Here we adjust the *label* column to a factor column, with *TREG* being 1 and *CD4+T* being 0
+
 ```{r label-to-factor}
 table(task1data$label, useNA = "ifany")
 ```
-
 
 ## T1.1
 
@@ -48,11 +49,12 @@ if (abc[1] == ncol(task1data)){
 ```{r sparsity, echo=FALSE}
 total_zeros <- sum(rowSums(task1data == 0))
 total_entries <- 5471 * 4124
-total_zeros / total_entries
+(total_zeros / total_entries) |> round(digits = 3)
 ```
-Our given data is reasonably sparse. In fact, below we have shown that approximately 66.2% of this dataset are zero entries. We can explore sparsity across the covariates as well. 
 
-``` {r covariate sparsity, echo=TRUE}
+Our given data is reasonably sparse. In fact, below we have shown that approximately 66.2% of this dataset are zero entries. We can explore sparsity across the covariates as well.
+
+```{r covariate sparsity, echo=TRUE}
 covariate_sparsities <- data.frame(Gene = colnames(task1data)[-1], 
                                    Sparsity = rep(0, ncol(task1data)-1)) 
 
@@ -71,6 +73,7 @@ ggplot(covariate_sparsities, aes(Sparsity)) +
 barplot(colMeans(task1data[2:ncol(task1data)]))
 
 ```
+
 can ask the question if all features are truly of use
 
 ```{r heatmap}
@@ -78,65 +81,47 @@ can ask the question if all features are truly of use
 task1matrix <- sapply(task1data, as.numeric) |> as.matrix()
 
 pal <- colorRampPalette(c("red", "yellow"), space = "rgb") 
-levelplot(task1matrix, main="Task 1 Data Heatmap", xlab=" ", ylab=" ", col.regions=pal(40), cuts=3, at=seq(0,1,0.5))#, useRaster = TRUE)
+levelplot(task1matrix, main="Task 1 Data Heatmap", xlab=" ", ylab=" ", col.regions=pal(40), cuts=3, at=seq(0,1,0.5)) #, useRaster = TRUE)
 
 
 ```
 
+## T1.2
 
-## T1.2 
-```{r eval_metrics, echo=TRUE}
-
-eval_metrics <- function(str, conf){
-  # setup
-  TN <- conf[[1]]
-  FN <- conf[[2]]
-  FP <- conf[[3]]
-  TP <- conf[[4]]
-  
-  # metrics
-  accuracy <- 1 - ((FN + FP) / sum(conf))
-  BA <- .5 * (TP / (TP + FN)) + .5 * (TN / (TN + FP))
-  precision <- TP / (TP + FP)
-  recall <- TP / (TP + FN)
-  F1 <- (precision * recall) / (precision + recall)
-  
-  # output
-  return(data.frame("Method" = str,
-                    "Accuracy" = accuracy,
-                    "Balanced Accuracy" = BA,
-                    "F1" = F1))
-}
-
-methods <- c(c("Random Forest", rf_conf_matrix), 
-             c("KNN", knn_conf_matrix), 
-             c("Logistic Regression", logistic_conf_matrix), 
-             c("LDA", lda_conf_matrix))
-
-```
+Below we will shuffle the rows in our dataset, then split them into *training*, *validation*, and *test* sets.
 
 ```{r data setup, echo=TRUE}
-train <- sample(c(TRUE, FALSE), nrow(task1data), replace=TRUE, prob=c(0.75,0.25))
-test <- !train
-task1_train <- task1data[train,]
-task1_test <- task1data[test,]
+task1data <- task1data[sample(1:nrow(task1data)), ]
+
+training_index <- floor(nrow(task1data) * 0.7)  # 70% for training
+validation_index <- floor(nrow(task1data) * 0.85)  # Next 15% for validation, leaving 15% for test set
+
+# Split the data into training, validation, and testing sets
+task1_train <- task1data[1:training_index, ]  # 70% of the data
+task1_validation <- task1data[(training_index + 1):validation_index, ]  # 15% of the data
+task1_test <- task1data[(validation_index + 1):nrow(task1data), ]  # Remaining 15% of the data
+
+# train <- sample(c(TRUE, FALSE), nrow(task1data), replace=TRUE, prob=c(0.75,0.25))
+# test <- !train
+# task1_train <- task1data[train,]
+# task1_test <- task1data[test,]
 ```
+
 ### Models
+
 #### LDA
 
 ```{r lda fit}
-lda_fit <- lda(label ~ ., data = task1data, subset = train)
+lda_fit <- lda(label ~ ., data = task1_train)
 ```
 
 ```{r lda predict}
 lda_pred_full <-  predict(lda_fit, task1_test)
 lda_pred <- predict(lda_fit, task1_test)$class
 
-test_labels <- task1data$label[test]
+test_labels <- task1_test$label
 lda_conf_matrix <- table(lda_pred, test_labels)
 ```
-
-
 
 ```{r lda eval, echo=TRUE}
 lda_conf_matrix
@@ -145,10 +130,10 @@ eval_metrics(str = "LDA", conf = lda_conf_matrix)
 
 ```
 
-
 #### Logistic Regression
+
 ```{r logistic regression, echo=TRUE}
-logistic_fit <- glm(label ~ ., data = task1data, subset = train, family = binomial)
+logistic_fit <- glm(label ~ ., data = task1_train, family = binomial)
 logistic_probs <-  predict(logistic_fit, newdata = task1_test, type = "response")
 ```
 
@@ -162,21 +147,24 @@ eval_metrics(str = "Logisitc Regression", conf = logistic_conf_matrix)
 ```
 
 #### QDA
-In running this classifier, there is a problem inherent in our data: there are too few observations in the two groups in the training set for qda() to run. In our training set, there are 2540 CD4+T's (0's) and 1624 TREG's (1's). In order for qda() to run properly, we can only have, at a maximum, 1624 covariates or columns in the dataset. At this juncture, we can consider dimenstion reduction methods. 
+
+In running this classifier, there is a problem inherent in our data: there are too few observations in the two groups in the training set for qda() to run. In our training set, there are 2540 CD4+T's (0's) and 1624 TREG's (1's). In order for qda() to run properly, we can only have, at a maximum, 1624 covariates or columns in the dataset. At this juncture, we can consider dimenstion reduction methods.
+
 ```{r qda, echo=TRUE}
-dummy_data <- task1data[,1:1624]
-qda_fit <- MASS::qda(label ~ ., data = dummy_data, subset = train)
+#dummy_data <- task1data[,1:1624]
+#qda_fit <- MASS::qda(label ~ ., data = dummy_data, subset = train)
 
 ```
 
 #### KNN
+
 ```{r knn, echo=TRUE}
 
-knn <- knn(task1_train, task1_test, task1data$label[train], k=1)
+knn <- knn3(label ~., data = task1_train, k=1)
+knn_preds <- predict(knn, newdata = task1_test, type = "prob")
+knn_conf_matrix <- table(knn3pred[,2], task1_test$label)
+eval_metrics("KNN", knn_conf_matrix)
 
-knn_conf_matrix <- table(knn, task1data$label[test])
-
-eval_metrics(knn_conf_matrix)
 ```
 
 #### GBDT
@@ -191,10 +179,14 @@ gbdt <- gbm(label ~ ., data = task1_train,
                    cv.folds = 5, 
                    verbose = TRUE)
 
-gbdt_preds <- predict(gbdt, newdata = task1_test, n.trees = 1000)
+gbdt_probs <- predict(gbdt, newdata = task1_test, n.trees = 1000, type = "response")
+
+gbdt_preds <-  rep(0, nrow(task1_test))
+gbdt_preds <- ifelse(gbdt_probs > .5, 1, 0)
+
+gbdt_conf_matrix <- table(gbdt_preds, task1_test$label)
 
 ```
-
 
 #### Random Forest
 
@@ -211,63 +203,81 @@ rf <- ranger(label~.,
 
 rf_preds <- predict(rf, data=task1_test)$predictions
 
-rf_conf_matrix <- table(rf_preds, task1data$label[test])
+rf_conf_matrix <- table(rf_preds, task1_test$label)
 
 ```
 
-
 #### SVM
+
 ```{r}
 cost = 10 #This is the regularisation parameter.
 svmfit = svm(label ~ ., data = task1_train, kernel = "linear", cost = cost, scale = FALSE)
-svm_predictions <- predict(svmfit, task1_test)
+svm_predictions <- predict(svmfit, task1_test, type = "response")
+summary(svm_predictions)
+
 ```
 
-### T1.2.PCA 
+## T1.2.PCA
+
 ```{r pca fit & data}
 pca <- prcomp(~., data = task1data[2:ncol(task1data)])
-
 top10_weights <- pca$rotation[,1:10]
 reduced_data <- pca$x[,1:10] |> as.data.frame()
 reduced_data$label <- task1data$label
 
 ```
 
-
 ```{r pca plot, echo=TRUE}
-summary(pca$x)[1:10]
-View(pca$x)
+#summary(pca$x)[1:10]
 
+table_pca <- rbind(pca$rotation[,1:10], summary(pca)$importance[,1:10])
 
-table_pca <- rbind(pca$rotation, summary(pca)$importance)
-print(table_pca[ ,1:10])
+var_props <- data.frame(PC = 1:10, "PVE" = table_pca['Proportion of Variance',])
+
+"
+ggplot(var_props, aes(x=PC, y=PVE)) + 
+  geom_line() + 
+  geom_point() + 
+  xlab('Principal Components') + 
+  ylab('Proportion of Variance Remaining') + 
+  xlim(0, .5)
+"
 
 par(mfrow=c(1,1))
-plot(table_pca['Proportion of Variance',], type = 'l', lwd = 5, col = 'blue', xlim = c(1,4), main = 'PC proportions of total variance', xlab = 'PC', ylab = 'Proportion of variance', axes = FALSE)
-axis(1, 1:10)
-axis(2)
+plot(table_pca['Proportion of Variance',], 
+     type = 'l', lwd = 5, col = 'blue', 
+     xlim = c(1,10), 
+     ylim = c(0,.05),
+     main = 'Proportion of Variance Explained by Principal Components', 
+     xlab = 'Principal Components', 
+     ylab = 'Proportion of Variance Unexplained', 
+     axes = TRUE)
+
 ```
 
+Same dataset splitting as earlier; PCA maintains row order by matrix multiplication.
+
 ```{r data setup, echo=TRUE}
-reduced_train <- reduced_data[train,]
-reduced_test <- reduced_data[test,]
+reduced_train <- reduced_data[1:training_index, ] 
+reduced_validation <- reduced_data[(training_index + 1):validation_index, ]
+reduced_test <- reduced_data[(validation_index + 1):nrow(task1data), ] 
 ```
+
 ### Models with PCA
 
 #### LDA
+
 ```{r pca lda fit}
-pca_lda_fit <- lda(label ~ ., data = reduced_data, subset = train)
+pca_lda_fit <- lda(label ~ ., data = reduced_train)
 ```
 
 ```{r pca lda predict}
 pca_lda_pred_full <-  predict(pca_lda_fit, reduced_test)
 pca_lda_pred <- predict(pca_lda_fit, reduced_test)$class
 
-pca_test_labels <- reduced_data$label[test]
+pca_test_labels <- reduced_test$label
 pca_lda_conf_matrix <- table(pca_lda_pred, pca_test_labels)
 ```
-
-
 
 ```{r pca lda eval, echo=TRUE}
 pca_lda_conf_matrix
@@ -275,10 +285,10 @@ eval_metrics(str = "LDA", conf = pca_lda_conf_matrix)
 
 ```
 
-
 #### Logistic Regression
+
 ```{r pca logistic regression, echo=TRUE}
-pca_logistic_fit <- glm(label ~ ., data = reduced_data, subset = train, family = binomial)
+pca_logistic_fit <- glm(label ~ ., data = reduced_train, family = binomial)
 pca_logistic_probs <-  predict(pca_logistic_fit, newdata = reduced_test, type = "response")
 ```
 
@@ -292,19 +302,33 @@ eval_metrics(str = "Logisitc Regression", conf = pca_logistic_conf_matrix)
 ```
 
 #### QDA
-In running this classifier, there is a problem inherent in our data: there are too few observations in the two groups in the training set for qda() to run. In our training set, there are 2540 CD4+T's (0's) and 1624 TREG's (1's). In order for qda() to run properly, we can only have, at a maximum, 1624 covariates or columns in the dataset. At this juncture, we can consider dimenstion reduction methods. 
+
+In running this classifier, there is a problem inherent in our data: there are too few observations in the two groups in the training set for qda() to run. In our training set, there are 2540 CD4+T's (0's) and 1624 TREG's (1's). In order for qda() to run properly, we can only have, at a maximum, 1624 covariates or columns in the dataset. At this juncture, we can consider dimenstion reduction methods.
+
 ```{r qda, echo=TRUE}
-dummy_data <- reduced_data[,1:1624]
-pca_qda_fit <- MASS::qda(label ~ ., data = dummy_data, subset = train)
+pca_qda_fit <- MASS::qda(label ~ ., data = reduced_train)
+
+pca_qda_pred_full <-  predict(pca_qda_fit, reduced_test)
+pca_qda_pred <- predict(pca_qda_fit, reduced_test)$class
+
+pca_test_labels <- reduced_test$label
+pca_qda_conf_matrix <- table(pca_qda_pred, pca_test_labels)
 
 ```
 
 #### KNN
+
 ```{r pca knn, echo=TRUE}
 
-pca_knn <- knn(reduced_train, reduced_test, reduced_data$label[train], k=1)
+pca_knn <- knn3Train(reduced_train[2:ncol(reduced_train)], 
+                 reduced_test[2:ncol(reduced_test)], 
+                 reduced_train$label, 
+                 k = 1, 
+                 l = 0, 
+                 prob = FALSE, 
+                 use.all = TRUE) # this returns the assigned classes from test cases
 
-pca_knn_conf_matrix <- table(pca_knn, reduced_data$label[test])
+pca_knn_conf_matrix <- table(pca_knn, reduced_test$label)
 
 eval_metrics("KNN", pca_knn_conf_matrix)
 ```
@@ -321,10 +345,15 @@ pca_gbdt <- gbm(label ~ ., data = reduced_train,
                    cv.folds = 5, 
                    verbose = TRUE)
 
-pca_gbdt_preds <- predict(pca_gbdt, newdata = reduced_test, n.trees = 1000)
+
+pca_gbdt_probs <- predict(pca_gbdt, newdata = reduced_test, n.trees = 1000, type = "response")
+
+pca_gbdt_preds <-  rep(0, nrow(task1_test))
+pca_gbdt_preds <- ifelse(pca_gbdt_probs > .5, 1, 0)
+
+pca_gbdt_conf_matrix <- table(pca_gbdt_preds, reduced_test$label)
 
 ```
-
 
 #### Random Forest
 
@@ -341,39 +370,106 @@ pca_rf <- ranger(label~.,
 
 pca_rf_preds <- predict(pca_rf, data=reduced_test)$predictions
 
-pca_rf_conf_matrix <- table(pca_rf_preds, reduced_data$label[test])
+pca_rf_conf_matrix <- table(pca_rf_preds, reduced_test$label)
 
 eval_metrics("RF", pca_rf_conf_matrix)
 
 ```
 
-
 #### SVM
+
 ```{r pca svm}
 cost = 10 #This is the regularisation parameter.
 pca_svmfit = svm(label ~ ., data = reduced_train, kernel = "linear", cost = cost, scale = FALSE)
 pca_svm_predictions <- predict(pca_svmfit, reduced_test)
 ```
 
-
 ## T1.3
 
-Classifiers to tweak:
-- KNN
-- GBTM
-- Random Forest
+```{r rf threshold selection}
+
+# Predict on the Validation Set
+
+# Random Forest Model Predictions
+rf_validation_preds <- predict(rf, data = task1_validation[2:ncol(task1_validation)], type = "response")$predictions
+
+# Calculate PR Curves Using Validation Labels (y_val)
+
+
+# PR Curve for Lasso    Precision-Recall
+rf_validation_pr_curve <- pr.curve(scores.class0 = rf_validation_preds, weights.class0 = task1_validation$label, curve = TRUE)
+
+cat("PR AUC (Random Forest, Validation Set):", rf_validation_pr_curve$auc.integral, "\n") # output
+
+
+# Create Data Frames for Precision-Recall Curves
+rf_curve_df <- data.frame(Model = "Random Forest", 
+                          Recall = rf_validation_pr_curve$curve[, 1], 
+                          Precision = rf_validation_pr_curve$curve[, 2], 
+                          Threshold = rf_validation_pr_curve$curve[, 3])
+
+```
+
+
+
+```{r knn threshold selection}
+# KNN Model Predictions
+knn_validation_preds <- predict(knn, data = task1_validation[2:ncol(task1_validation)], type = "response")$predictions
+
+# Calculate PR Curves Using Validation Labels (y_val)
+
+
+# PR Curve for Lasso    Precision-Recall
+knn_validation_pr_curve <- pr.curve(scores.class0 = knn_validation_preds, weights.class0 = task1_validation$label, curve = TRUE)
+
+cat("PR AUC (Random Forest, Validation Set):", knn_validation_pr_curve$auc.integral, "\n") # output
+
+
+# Create Data Frames for Precision-Recall Curves
+knn_curve_df <- data.frame(Model = "Random Forest", 
+                          Recall = knn_validation_pr_curve$curve[, 1], 
+                          Precision = knn_validation_pr_curve$curve[, 2], 
+                          Threshold = knn_validation_pr_curve$curve[, 3])
+
+```
+
+```{r optimal thresholds}
+# Combining data frames for elastic net and lasso
+# pr_data <- bind_rows(df_1d, df_3d)
+
+
+# Compute F1 Scores and Find Optimal Thresholds
+pr_data <- pr_data %>%
+  mutate(F1 = 2 * (Precision * Recall) / (Precision + Recall + 1e-6))  # Avoid division by zero
+
+
+# Find the Optimal Threshold for Each Model
+optimal_thresholds <- pr_data %>%
+  group_by(Model) %>%
+  filter(F1 == max(F1)) %>%
+  summarize(Optimal_Threshold = Threshold[1], Max_F1 = F1[1])
+
+# Print Optimal Thresholds
+print(optimal_thresholds)
+
+```
+
+Classifiers to tweak: - KNN - GBDT - Random Forest
 
 #### KNN
 
-In the *k*-Nearest Neighbor classifier, here we are tweaking the main parameter *k*, the number of neighbors taken into account in fitting the model.  
+In the *k*-Nearest Neighbor classifier, here we are tweaking the main parameter *k*, the number of neighbors taken into account in fitting the model.
+
 ```{r knn v2, echo=TRUE}
 knn_metrics <- eval_metrics(str = "1NN", conf = knn_conf_matrix)
-for (k in 1:10){
-  fit <- knn(task1_train, task1_test, task1data$label[train], k=k)
+for (k in 2:10){
+  fit <- knn3(label ~., data = task1_train, k=k)
   
-  conf_matrix <- table(fit, task1data$label[test])
+  predicted <- predict(fit, newdata = task1_test, type = "prob")
   
-  rbind(knn_metrics, eval_metrics(cat(k,"NN"), conf_matrix))
+  conf_matrix <- table(predicted[,2], task1_test$label)
+  
+  knn_metrics[k,] <- eval_metrics(paste(as.character(k), "NN"), conf_matrix)
 }
 
 knn_metrics
@@ -383,6 +479,7 @@ knn_metrics
 #### GBDT
 
 One classifier to improve upon is Gradient Boosted Decision Trees, namely by tuning the hyperparameter lambda that can be thought of as a shrinkage parameter.
+
 ```{r, GBTM v2, echo=TRUE}
 # Define grid of lambda (shrinkage) values to evaluate
 lambda_grid <- c(0.001, 0.01,0.03,0.05)
@@ -391,7 +488,7 @@ lambda_grid <- c(0.001, 0.01,0.03,0.05)
 test_errors <- numeric(length(lambda_grid))
 ```
 
-```{r}
+```{r some workshop code for tuning}
 # Loop over each lambda value
 for (i in seq_along(lambda_grid)) {
   lambda <- lambda_grid[i]
@@ -413,14 +510,14 @@ for (i in seq_along(lambda_grid)) {
   # Calculate the Mean Squared Error on the test set
   test_errors[i] <- mean((predictions - task1_test$label)^2)
 }
-```
 
-```{r}
+# code is from a workshop 
+
 # Combine lambda values and test errors into a data frame for plotting
 error_df <- data.frame(lambda = lambda_grid, test_error = test_errors)
 
 # Plot the test error over the range of lambda values
-ggplot(error_df, aes(x = lambda, y = test_error)) +
+ggplot(error_df, aes(x = lambda, y = test_error)) + 
   geom_line() +
   geom_point() +
   labs(title = "Test Error vs Lambda (Shrinkage)", 
@@ -429,10 +526,34 @@ ggplot(error_df, aes(x = lambda, y = test_error)) +
   theme_minimal()
 ```
 
-
 ## Model Evaluation
-```{r summary table}
 
+```{r eval_metrics function, echo=TRUE}
+
+eval_metrics <- function(str, conf){
+  # setup
+  TN <- conf[[1]]
+  FN <- conf[[2]]
+  FP <- conf[[3]]
+  TP <- conf[[4]]
+  
+  # metrics
+  accuracy <- 1 - ((FN + FP) / sum(conf))
+  BA <- .5 * (TP / (TP + FN)) + .5 * (TN / (TN + FP))
+  precision <- TP / (TP + FP)
+  recall <- TP / (TP + FN)
+  F1 <- 2 * (precision * recall) / (precision + recall + 1e-6)
+  
+  # output
+  return(data.frame("Method" = str,
+                    "Accuracy" = accuracy |> round(digits = 3),
+                    "Balanced Accuracy" = BA |> round(digits = 3),
+                    "F1" = F1 |> round(digits = 3)))
+}
+
+```
+
+```{r summary table}
 
 # need to add ROC / AUC info
 
@@ -441,15 +562,15 @@ base_summary_table <- rbind(eval_metrics("LDA", lda_conf_matrix),
                        eval_metrics("Logistic Regression", logistic_conf_matrix),
                        eval_metrics("KNN", knn_conf_matrix),
                        eval_metrics("Random Forest", rf_conf_matrix),
-                       c("GBDT", rep(NA,3)),
+                       eval_metrics("GBDT", gbdt_conf_matrix),
                        c("SVM", rep(NA,3)))
 
 pca_summary_table <- rbind(eval_metrics("LDA", pca_lda_conf_matrix), 
-                       c("QDA", rep(NA,3)),
+                       eval_metrics("QDA", pca_qda_conf_matrix),
                        eval_metrics("Logistic Regression", pca_logistic_conf_matrix),
                        eval_metrics("KNN", pca_knn_conf_matrix),
                        eval_metrics("Random Forest", pca_rf_conf_matrix),
-                       c("GBDT", rep(NA,3)),
+                       eval_metrics("GBDT", pca_gbdt_conf_matrix),
                        c("SVM", rep(NA,3)))
 
 
@@ -466,8 +587,3 @@ pca_summary_table <- rbind(eval_metrics("LDA", pca_lda_conf_matrix),
 
 
 ```
-
-
-
-
-
