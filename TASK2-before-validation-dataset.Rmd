@@ -1,0 +1,697 @@
+---
+title: "TASK2"
+output: html_document
+date: "2024-11-13"
+---
+
+--- LIBRARIES ---
+
+```{r}
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(ISLR)
+```
+
+```{r}
+data <- read.csv("data2.csv.gz")
+```
+
+Binding: Indicates that the compound interacts or attaches effectively to the thrombin target site.(1)
+Non-binding: Indicates that the compound does not interact effectively with thrombin.(0)
+In the context of drug discovery, thrombin is a protein that could be a target for drugs aimed at affecting blood clotting, and identifying compounds that bind to thrombin can be a critical step in developing new medications.
+
+```{r}
+set.seed(123)
+na_counts <- sapply(data, function(x) sum(is.na(x)))
+totalna <- sum(na_counts)
+print(totalna)
+
+```
+
+```{r}
+# Compare Binding vs Non-binding
+binding_data <- data[data[, 1] == 1, ]
+count <- 0  # Initialize count
+for (i in seq_len(nrow(data))) {
+  if (data[i, 1] == -1) {
+    count <- count + 1
+  }
+}
+
+binding_count = nrow(data) - count
+non_binding_count = count
+print(non_binding_count)
+ggplot(data, aes(x = data[, 1])) + geom_bar() + labs(x = "Binding Status", y = "Count")
+
+```
+
+
+
+```{r}
+feature_sum <- colSums(data[, 2:100001])
+hist(feature_sum, breaks = 50, main = "Distribution of Feature Sums", xlab = "Sum of binary feature values")
+
+```
+
+```{r}
+head(data)
+```
+
+```{r}
+# Iterate through label and make them 0 if they are -1, 1 otherwise
+for (i in 1:nrow(data)) {
+  if (data[i, 1] == -1) {
+    data[i, 1] <- 0  
+  } else {
+    data[i, 1] <- 1
+  }
+}
+```
+
+
+```{r}
+# Find duplicate columns
+unique_data <- data[, !duplicated(as.list(data))]
+num_repeated <- ncol(data) - ncol(unique_data)
+cat("The new dataset has dimensions:", dim(unique_data), "\n")
+```
+
+To compare our models we mesure their performance on unseen data. So we split the dataset in training and test
+```{r}
+# Calculate row indices for each split
+set.seed(12)  # Set seed for reproducibility
+unique_data <- unique_data[sample(nrow(unique_data)), ]
+n <- nrow(unique_data)
+end_training <- floor(n * 0.7)  # 70% for training
+end_validation <- floor(n * 0.85)  # Next 10% for validation
+
+# Split the data into training, validation, and testing sets
+training_data <- unique_data[1:end_training, ]  # 70% of the data
+validation_data <- unique_data[(end_training + 1):end_validation, ]  # 10% of the data
+testing_data <- unique_data[(end_validation + 1):n, ]  # Remaining 20% of the data
+
+
+
+# # Use 80% of the data for training
+# end_training <- floor(nrow(unique_data) * 0.8)
+# # Split the data into training and testing sets
+# training_data <- unique_data[1:end_training, ]
+# testing_data <- unique_data[(end_training + 81):nrow(unique_data), ]
+print(sum(training_data[,1]))
+print(sum(testing_data[,1]))
+print(sum(validation_data[,1]))
+
+```
+
+
+Lets build Lasso and Elastic Net with the training data
+```{r}
+library(Matrix)
+library(glmnet)
+
+#create dep. var
+y_train <- training_data[,1]
+y_true <- testing_data[,1]
+
+#create training and testing matrix with ind.var
+features_train <- training_data[,-1]
+sparse_data_train <- as(features_train, "sparseMatrix")
+
+features_test<- testing_data[,-1]
+sparse_data_test <- as(features_test, "sparseMatrix")
+```
+
+
+```{r}
+#LASSO CLEAN
+cv_fit_1d <- cv.glmnet(sparse_data_train, y_train, family = "binomial", parallel = TRUE, alpha= 1)
+selected_features_1d <- coef(cv_fit_1d, s = "lambda.min")
+selected_features_1d<- as.matrix(selected_features_1d)
+selected_features_nonzero_1d <- selected_features_1d[selected_features_1d != 0, ]
+cat("There are a total of ",length(selected_features_nonzero_1d)," features according to LASSO in unique dataset","\n")
+print(selected_features_nonzero_1d)
+```
+
+
+```{r}
+#Elastic Net CLEAN
+cv_fit_3d <- cv.glmnet(sparse_data_train, y_train, family = "binomial", parallel = TRUE, alpha= 1/2)
+selected_features_3d <- coef(cv_fit_3d, s = "lambda.min")
+selected_features_3d<- as.matrix(selected_features_3d)
+selected_features_nonzero_3d <- selected_features_3d[selected_features_3d != 0, ]
+cat("There are a total of ",length(selected_features_nonzero_3d)," features according to Elastic Net in unique dataset","\n")
+print(selected_features_nonzero_3d)
+```
+Plot the choice of lamda
+```{r}
+## plot of the solution path, i.e. estimated coefficients vs log (lambda), where lambda is the tuning parameter
+plot(cv_fit_1d, xvar="lambda", label= TRUE)
+plot(cv_fit_3d, xvar="lambda", label= TRUE)
+```
+I commented the ridge regression out of the code because it keeps all the features and just makes the coefficeints smaller while the other models actually removes features by shrinking they coefficeints to 0.
+
+Now we us the models on unseen data to predict the labels and evaluate the performance
+Because we have unbalanced data instead of using the normal ROC and AUC we use the PR ROC and PR AUC
+```{r} 
+
+library(PRROC)
+# Calculate PR AUC for predictions_1d (Lasso)
+predictions_1d <- predict(cv_fit_1d, sparse_data_test, s = "lambda.min", type = "response") #unseen data prediction
+pr_1d <- pr.curve(scores.class0 = predictions_1d, weights.class0 = y_test, curve = TRUE)
+cat("PR AUC (Lasso):", pr_1d$auc.integral, "\n")
+
+# Calculate PR AUC for predictions_3d (Elastic Net)
+predictions_3d <- predict(cv_fit_3d, sparse_data_test, s = "lambda.min", type = "response")
+pr_3d <- pr.curve(scores.class0 = predictions_3d, weights.class0 = y_test, curve = TRUE)
+cat("PR AUC (Elastic Net):", pr_3d$auc.integral, "\n")
+
+
+df_1d <- data.frame(Recall = pr_1d$curve[, 1], Precision = pr_1d$curve[, 2], Threshold = pr_1d$curve[, 3], Model = "Lasso")
+df_3d <- data.frame(Recall = pr_3d$curve[, 1], Precision = pr_3d$curve[, 2], Threshold = pr_3d$curve[, 3], Model = "Elastic Net")
+pr_data <- bind_rows(df_1d, df_3d)
+
+
+# Compute F1 scores for each threshold to find the optimal
+pr_data <- pr_data %>%
+  mutate(F1 = 2 * (Precision * Recall) / (Precision + Recall + 1e-6))  # Add small value to avoid division by zero
+
+# Find optimal threshold for each model (maximizing F1 score)
+optimal_thresholds <- pr_data %>%
+  group_by(Model) %>%
+  filter(F1 == max(F1)) %>%
+  summarize(Optimal_Threshold = Threshold[1], Max_F1 = F1[1])
+
+# Print optimal thresholds
+print(optimal_thresholds)
+
+# Plot Precision-Recall Curves with ggplot2
+ggplot(pr_data, aes(x = Recall, y = Precision, color = Model)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Precision-Recall Curves for Lasso and Elastic Net",
+    x = "Recall",
+    y = "Precision",
+    color = "Model"
+  ) +
+  theme_minimal()
+```
+
+
+```{r}
+# Measure performance on unseen data using the true y
+# Convert probabilities to binary predictions using the optimal threshold for each model (tuning thew parameters)
+predicted_classes_lasso <- ifelse(predictions_1d > 0.4048683, 1, 0)
+accuracy <- mean(predicted_classes_lasso == y_true)
+cat("The accuracy of Lasso on the test set is:", accuracy, "\n")
+
+predicted_classes_EN <- ifelse(predictions_3d > 0.4200326, 1, 0) # 
+accuracy <- mean(predicted_classes_EN == y_true)
+cat("The accuracy of Elastic Net on the test set is:", accuracy, "\n")
+
+```
+We tuned the parameters of each moddel such that it uses thye optimal threshold and we obatain the same accracy but 
+we get abigger AUC 
+
+We can test on how well the 2 model perform top choose the best: 
+```{r}
+# Cross validation errors when we training the models
+lasso_errord <- min(cv_fit_1d$cvm)
+mix_errord <- min(cv_fit_3d$cvm)
+
+cat("Lasso CV Error:", lasso_errord, "\n")
+cat("Elastic CV Net Error:", mix_errord, "\n")
+```
+
+```{r}
+conf_matrix_lasso <- table(Predicted = predicted_classes_lasso, Actual = y_test)
+print("Confusion Matrix Lasso:")
+print(conf_matrix_lasso)
+
+conf_matrix_EN <- table(Predicted =  predicted_classes_EN , Actual = y_test)
+print("Confusion Matrix Elastic:")
+print(conf_matrix_EN)
+```
+
+
+################ XGBOOST  ##########################
+FIRST STEP: Create train and test data.
+
+BASED ON HOW DATA IS SPLITED EARLIER, TO KEEP THE SAME y_test
+
+
+---- CODIGO CAMBIADO ----
+
+```{r}
+library(Matrix)
+library(glmnet)
+
+#create dep. var
+y_train <- training_data[,1]
+y_valid <- validation_data[,1]
+y_true <- testing_data[,1]
+
+#create training,  validation and  testing matrix with ind.var
+features_train <- training_data[,-1]
+sparse_data_train <- as(features_train, "sparseMatrix")
+
+features_valid <- validation_data[,-1]
+sparse_data_valid <- as(features_valid, "sparseMatrix")
+
+features_test<- testing_data[,-1]
+sparse_data_test <- as(features_test, "sparseMatrix")
+
+```
+
+
+
+```{r}
+library(xgboost)
+library(Matrix)
+library(glmnet)
+library(caTools)
+# Convert to DMatrix format for XGBoost
+y_test <- y_valid
+dtrain_xg <- xgb.DMatrix(data = sparse_data_train, label = y_train)
+dvalid_xg <- xgb.DMatrix(data = sparse_data_valid, label = y_valid)
+dtest_xg <- xgb.DMatrix(data = sparse_data_test, label = y_true)
+
+```
+
+
+```{r}
+# Simplified grid for essential parameters
+param_grid_xg <- expand.grid(
+  max_depth = c(4, 6, 8), # tree depth
+  eta = c(0.1, 0.3), # Learning rate F_t+1 = eta * T_t + F_t 
+  subsample = c(0.6, 0.8), # fraction of rows
+  colsample_bytree = c(0.8) # fraction of features
+)
+
+# Track results
+best_model_xg <- NULL
+best_logloss_xg <- Inf
+
+for (i in 1:nrow(param_grid_xg)) {
+  params_xg <- list(
+    booster = "gbtree",
+    objective = "binary:logistic",
+    eval_metric = "logloss",
+    max_depth = param_grid_xg$max_depth[i],
+    eta = param_grid_xg$eta[i],
+    subsample = param_grid_xg$subsample[i],
+    colsample_bytree = param_grid_xg$colsample_bytree[i]
+  )
+  
+  # Cross-validation for current parameters
+  cv_xg <- xgb.cv(
+    params = params_xg,
+    data = dtrain_xg,
+    nrounds = 50,              # Keep this small to limit computation
+    nfold = 5,                 # Stratified 5-fold CV
+    early_stopping_rounds = 10,
+    verbose = FALSE
+  )
+  
+  # Update the best model if logloss improves
+  min_logloss_xg <- min(cv_xg$evaluation_log$test_logloss_mean)
+  if (min_logloss_xg < best_logloss_xg) {
+    best_logloss_xg <- min_logloss_xg
+    best_model_xg <- params_xg
+  }
+}
+# STORE BEST_MODEL PARAMETERS
+```
+
+
+```{r}
+# Initialize a data frame to store results
+if (!exists("model_results_xg")) {
+  model_results_xg <- data.frame(
+    eta = numeric(),
+    max_depth = integer(),
+    subsample = numeric(),
+    colsample_bytree = numeric(),
+    logloss = numeric(),
+    stringsAsFactors = FALSE
+  )
+}
+
+# Append the best_model parameters and log loss
+model_results_xg <- rbind(
+  model_results_xg,
+  data.frame(
+    eta = best_model_xg$eta,
+    max_depth = best_model_xg$max_depth,
+    subsample = best_model_xg$subsample,
+    colsample_bytree = best_model_xg$colsample_bytree,
+    logloss = best_logloss_xg  # Use the corresponding logloss for the best model
+  )
+)
+
+# Print the updated table
+print(model_results_xg)
+
+print(best_model_xg)
+
+```
+
+
+```{r}
+final_params_xg <- list(
+  booster = "gbtree",
+  objective = "binary:logistic",
+  eval_metric = "logloss",
+  eta = best_model_xg$eta,                 # Replace with the optimal eta value
+  max_depth = best_model_xg$max_depth,     # Replace with the optimal max_depth
+  subsample = best_model_xg$subsample,     # Replace with the optimal subsample value
+  colsample_bytree = best_model_xg$colsample_bytree # Replace with optimal colsample_bytree
+)
+
+# Train the model with the optimal parameters
+final_model_xg <- xgb.train(
+  params = final_params_xg, 
+  data = dtrain_xg, 
+  nrounds = 100,                        # You can adjust the number of rounds based on early stopping results
+  watchlist = list(train = dtrain_xg, test = dvalid_xg), 
+  early_stopping_rounds = 10,           # Stop training if no improvement is seen in 10 rounds
+  verbose = 0                           # Optional: set to 0 for silent training
+)
+
+# Make predictions on the test data
+predictions_xg <- predict(final_model_xg, dvalid_xg) #CHANGE TEST INTO VALIDATE
+
+# Convert probabilities to binary predictions (0 or 1)
+predictions_binary_xg <- ifelse(predictions_xg > 0.12, 1, 0)
+
+# Evaluate the final model
+accuracy_xg <- sum(predictions_binary_xg == y_valid) / length(y_valid)
+print(paste("Final Accuracy:", accuracy_xg))
+
+# Confusion matrix
+conf_matrix_xg <- table(Predicted = predictions_binary_xg, Actual = y_valid)
+print("Confusion Matrix:")
+print(conf_matrix_xg)
+xgb.save(final_model_xg, "xgboost_final_model_xg.model")
+
+# Feature importance
+importance_matrix_xg <- xgb.importance(model = final_model_xg)
+print(importance_matrix_xg)
+
+top_features_xg <- importance_matrix_xg[1:25, ]  # Select the top 30 features
+
+# Plot the top 30 features
+xgb.plot.importance(importance_matrix = top_features_xg, 
+                    main = "Top 30 Most Important Features",
+                    xlab = "Feature Importance")
+```
+
+
+
+
+```{r}
+library(ROCR)
+library(ggplot2)
+
+# Generate prediction and performance objects
+pred_xg <- prediction(predictions_xg, y_valid)  # Using predicted probabilities and true labels
+perf_xg <- performance(pred_xg, "prec", "rec")       # Precision vs Recall (TPR)
+
+# Extract precision and recall (TPR) values
+precision_xg <- perf_xg@y.values[[1]]  # Precision values
+recall_xg <- perf_xg@x.values[[1]]     # Recall (TPR) values
+
+# Create a data frame for plotting
+precision_recall_data_xg <- data.frame(Recall = recall_xg, Precision = precision_xg)
+
+# Plot Precision vs. TPR (Recall)
+ggplot(precision_recall_data_xg, aes(x = Recall, y = Precision)) +
+  geom_line(color = "blue", size = 1) +
+  labs(
+    title = "Precision vs TPR (Recall)",
+    x = "True Positive Rate (Recall)",
+    y = "Precision"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+library(PRROC)
+library(ggplot2)
+library(dplyr)
+
+# XGBoost PR AUC
+#pr_xg <- pr.curve(scores.class0 = predictions_xg, weights.class0 = y_test, curve = TRUE)
+pr_xg <- pr.curve(scores.class0 = predictions_xg, weights.class0 = y_valid, curve = TRUE)
+cat("PR AUC (XGBoost):", pr_xg$auc.integral, "\n")
+
+# Combine data for all models
+
+df_1d <- data.frame(Recall = pr_1d$curve[, 1], Precision = pr_1d$curve[, 2], Threshold = pr_1d$curve[, 3], Model = "Lasso")
+df_3d <- data.frame(Recall = pr_3d$curve[, 1], Precision = pr_3d$curve[, 2], Threshold = pr_3d$curve[, 3], Model = "Elastic Net")
+df_xg <- data.frame(Recall = pr_xg$curve[, 1], Precision = pr_xg$curve[, 2], Threshold = pr_xg$curve[, 3], Model = "XGBoost")
+
+pr_data_l_n_x <- bind_rows(df_1d, df_3d, df_xg)
+
+# Compute F1 scores for each threshold, which combines Precision and Recall into a single metric.
+pr_data_l_n_x <- pr_data_l_n_x %>%
+  mutate(F1 = 2 * (Precision * Recall) / (Precision + Recall + 1e-6))  # Avoid division by zero
+
+# Find optimal threshold for each model
+optimal_thresholds_l_n_x <- pr_data_l_n_x %>%
+  group_by(Model) %>%
+  filter(F1 == max(F1)) %>%
+  summarize(Optimal_Threshold = Threshold[1], Max_F1 = F1[1])
+
+# Print optimal thresholds
+print(optimal_thresholds_l_n_x)
+
+# Plot Precision-Recall Curves
+ggplot(pr_data_l_n_x, aes(x = Recall, y = Precision, color = Model)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Precision-Recall Curves for Lasso, Elastic Net, and XGBoost",
+    x = "Recall",
+    y = "Precision",
+    color = "Model"
+  ) +
+  theme_minimal()
+#Precision = TP / TP + FP
+# Recall = True Positive Rate = TP / TP + FN
+# ACTUAL 0 1
+# PREDIC
+#     0  TN FN  
+#     1  FP TP
+
+tn_xg = conf_matrix_xg[1,1]
+tp_xg = conf_matrix_xg[2,2]
+fp_xg = conf_matrix_xg[1,2]
+fn_xg = conf_matrix_xg[2,1]
+
+```
+
+
+```{r}
+library(ggplot2)
+
+# Initialize an empty data frame to store results
+threshold_results_xg <- data.frame(Threshold_xg = numeric(), BalancedAccuracy_xg = numeric())
+
+# Define a sequence of threshold values
+threshold_values_xg <- seq(0, 1, by = 0.001)
+
+# Loop through each threshold value
+for (threshold_xg in threshold_values_xg) {
+  # Convert probabilities to binary predictions based on the current threshold
+  predicted_classes_xg <- ifelse(predictions_xg > threshold_xg, 1, 0)
+  
+  # Calculate the confusion matrix
+  conf_matrix_xg <- table(Predicted_xg = predicted_classes_xg, Actual_xg = y_test)
+  
+  # Extract TP, TN, FP, FN (use tryCatch for error handling in case of missing categories)
+  tn_xg <- tryCatch(conf_matrix_xg[1, 1], error = function(e) 0)
+  tp_xg <- tryCatch(conf_matrix_xg[2, 2], error = function(e) 0)
+  fp_xg <- tryCatch(conf_matrix_xg[2, 1], error = function(e) 0)
+  fn_xg <- tryCatch(conf_matrix_xg[1, 2], error = function(e) 0)
+  
+  # Calculate balanced accuracy
+  balan_acc_xg <- 0.5 * (tp_xg / (tp_xg + fn_xg + 1e-6) + tn_xg / (tn_xg + fp_xg + 1e-6)) # Add small value to avoid division by zero
+  
+  # Append the results to the data frame
+  threshold_results_xg <- rbind(threshold_results_xg, data.frame(Threshold_xg = threshold_xg, BalancedAccuracy_xg = balan_acc_xg))
+}
+
+# Print the results
+# print(threshold_results_xg)
+
+# Plot Balanced Accuracy vs Threshold
+ggplot(threshold_results_xg, aes(x = Threshold_xg, y = BalancedAccuracy_xg)) +
+  geom_line(color = "blue", size = 1) +
+  geom_point(color = "red", size = 2) +
+  labs(
+    title = "Balanced Accuracy vs Threshold (XGBoost)",
+    x = "Threshold",
+    y = "Balanced Accuracy"
+  ) +
+  theme_minimal()
+
+max_balanced_accuracy_xg <- threshold_results_xg[which.max(threshold_results_xg$BalancedAccuracy_xg), ]
+
+# Output the results
+cat("Threshold with Maximum Balanced Accuracy (XGBoost):\n")
+cat("Threshold_xg:", max_balanced_accuracy_xg$Threshold_xg, "\n")
+cat("Balanced Accuracy_xg:", max_balanced_accuracy_xg$BalancedAccuracy_xg, "\n")
+
+```
+
+
+
+```{r}
+# BEST THRESHOLD BY VALIDATING
+predicted_classes_xg_test <- ifelse(predictions_xg > max_balanced_accuracy_xg$Threshold_xg , 1, 0)
+# TO TEST A PARTICULAR THRESHOLD:
+# predicted_classes_xg_test <- ifelse(predictions_xg > 0.5 , 1, 0)
+
+conf_matrix_xg_test <- table(Predicted = predicted_classes_xg_test, Actual = y_test)
+print("Confusion Matrix Test XG:")
+print(conf_matrix_xg_test)
+
+tn_xg_t = conf_matrix_xg_test[1,1]
+tp_xg_t = conf_matrix_xg_test[2,2]
+fp_xg_t = conf_matrix_xg_test[2,1]
+fn_xg_t = conf_matrix_xg_test[1,2]
+
+balan_acc_xg_test = 0.5*( tp_xg_t / (tp_xg_t+fn_xg_t) + tn_xg_t / (tn_xg_t + fp_xg_t) )
+print(balan_acc_xg_test)
+
+```
+Without validation, using Threshold = 0.5
+[1] "Confusion Matrix Test XG:"
+         Actual
+Predicted   0   1
+        0 112   3
+        1   0   5
+[1] Balanced accuracy for Test 0.8125
+------------------------------------------
+With validation, using Threshold = 0.039
+[1] "Confusion Matrix Test XG:"
+         Actual
+Predicted   0   1
+        0 107   1
+        1   5   7
+[1] Balanced accuracy for Test  0.9151786
+
+
+----- SUPPORT VECTOR MACHINES -----
+
+
+
+```{r}
+library(Matrix)
+library(glmnet)
+
+#create dep. var
+y_train <- training_data[,1]
+y_valid <- validation_data[,1]
+y_true <- testing_data[,1]
+
+#create training,  validation and  testing matrix with ind.var
+features_train <- training_data[,-1]
+sparse_data_train <- as(features_train, "sparseMatrix")
+
+features_valid <- validation_data[,-1]
+sparse_data_valid <- as(features_valid, "sparseMatrix")
+
+features_test<- testing_data[,-1]
+sparse_data_test <- as(features_test, "sparseMatrix")
+
+
+```
+
+
+```{r}
+
+library(e1071)
+
+# Combine sparse data and target into a data frame
+data_train <- as.data.frame(as.matrix(sparse_data_train))
+data_train$y <- y_train
+
+
+
+# Perform cross-validation to tune the `cost` hyperparameter
+tune.out <- tune(
+  svm, 
+  y_train,                              # Formula: target ~ features
+  data = sparse_data_train,                  # Dataset for tuning
+  kernel = "linear",                  # Linear kernel
+  ranges = list(cost = c(10, 100)), # Range of cost values
+  scale = FALSE, # Do not scale the data
+  tunecontrol = tune.control(cross = 2) 
+)
+
+# Display the tuning results
+summary(tune.out)
+
+# Extract the best model
+best_svm <- tune.out$best.model
+
+# Print the best cost value
+cat("Best Cost:", tune.out$best.parameters$cost, "\n")
+```
+
+
+```{r}
+# Fit the final SVM model with the best cost
+svmfit <- svm(
+  y_train, 
+  data = sparse_data_train, 
+  kernel = "linear", 
+  cost = 10, 
+  scale = FALSE
+)
+
+# Display the final model
+summary(svmfit)
+
+```
+
+```{r}
+# Load the e1071 library
+library(e1071)
+
+# Ensure data is in the correct format
+# sparse_data_train: a matrix or data frame of binary features
+# y_train: a binary vector (0 or 1)
+
+# Train the SVM model with a linear kernel
+svm_model <- svm(
+  x = sparse_data_train,
+  y = y_train,
+  kernel = "linear",
+  cost = 100,
+  scale = FALSE
+)
+
+# Extract the coefficients of the SVM model
+weights <- t(svm_model$coefs) %*% svm_model$SV
+weights <- as.vector(weights)
+
+# Identify the selected features
+selected_features <- which(weights != 0)
+
+# Output the selected features and their weights
+cat("Selected features:\n")
+print(selected_features)
+
+# Output the trained SVM model
+cat("Trained SVM Model:\n")
+print(svm_model)
+
+```
+
+
+
+
