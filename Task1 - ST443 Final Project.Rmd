@@ -40,13 +40,13 @@ table(task1data$label, useNA = "ifany")
 
 ```{r missing data, echo=TRUE}
 
-abc <- task1data |> is.na() |> colSums() |> table()
-if (abc[1] == ncol(task1data)){
+nas <- task1data |> is.na() |> colSums() |> table()
+if (nas[1] == ncol(task1data)){
   print("We have that there are no missing data in any columns which will be hekpful in our analysis")
 }
 ```
 
-```{r sparsity, echo=FALSE}
+```{r overall sparsity, echo=FALSE}
 total_zeros <- sum(rowSums(task1data == 0))
 total_entries <- 5471 * 4124
 (total_zeros / total_entries) |> round(digits = 3)
@@ -54,7 +54,7 @@ total_entries <- 5471 * 4124
 
 Our given data is reasonably sparse. In fact, below we have shown that approximately 66.2% of this dataset are zero entries. We can explore sparsity across the covariates as well.
 
-```{r covariate sparsity, echo=TRUE}
+```{r sparsity across features, echo=TRUE}
 covariate_sparsities <- data.frame(Gene = colnames(task1data)[-1], 
                                    Sparsity = rep(0, ncol(task1data)-1)) 
 
@@ -107,7 +107,7 @@ task1_test <- task1data[(validation_index + 1):nrow(task1data), ]  # Remaining 1
 # task1_test <- task1data[test,]
 ```
 
-### Models
+### Base Models
 
 #### LDA
 
@@ -141,7 +141,6 @@ logistic_probs <-  predict(logistic_fit, newdata = task1_test, type = "response"
 logistic_pred <-  rep(0, nrow(task1_test))
 logistic_pred[logistic_probs > .5] <-  1
 
-# tail(cbind(task1_train$label,logistic_pred))
 logistic_conf_matrix <- table(logistic_pred, task1_test$label)
 eval_metrics(str = "Logisitc Regression", conf = logistic_conf_matrix)
 ```
@@ -159,12 +158,10 @@ In running this classifier, there is a problem inherent in our data: there are t
 #### KNN
 
 ```{r knn, echo=TRUE}
-
 knn <- knn3(label ~., data = task1_train, k=1)
 knn_preds <- predict(knn, newdata = task1_test, type = "prob")
-knn_conf_matrix <- table(knn3pred[,2], task1_test$label)
+knn_conf_matrix <- table(knn_preds[,2], task1_test$label)
 eval_metrics("KNN", knn_conf_matrix)
-
 ```
 
 #### GBDT
@@ -175,9 +172,7 @@ gbdt <- gbm(label ~ ., data = task1_train,
                    distribution = "gaussian", 
                    n.trees = 1000, 
                    interaction.depth = 4, 
-                   shrinkage = .001, 
-                   cv.folds = 5, 
-                   verbose = TRUE)
+                   shrinkage = .001)
 
 gbdt_probs <- predict(gbdt, newdata = task1_test, n.trees = 1000, type = "response")
 
@@ -224,16 +219,13 @@ pca <- prcomp(~., data = task1data[2:ncol(task1data)])
 top10_weights <- pca$rotation[,1:10]
 reduced_data <- pca$x[,1:10] |> as.data.frame()
 reduced_data$label <- task1data$label
-
 ```
 
 ```{r pca plot, echo=TRUE}
-#summary(pca$x)[1:10]
+table_pca <- rbind(pca$rotation[,1:20], summary(pca)$importance[,1:20])
 
-table_pca <- rbind(pca$rotation[,1:10], summary(pca)$importance[,1:10])
 
-var_props <- data.frame(PC = 1:10, "PVE" = table_pca['Proportion of Variance',])
-
+# var_props <- data.frame(PC = 1:10, 'PVE' = table_pca['Proportion of Variance',])
 "
 ggplot(var_props, aes(x=PC, y=PVE)) + 
   geom_line() + 
@@ -241,12 +233,16 @@ ggplot(var_props, aes(x=PC, y=PVE)) +
   xlab('Principal Components') + 
   ylab('Proportion of Variance Remaining') + 
   xlim(0, .5)
-"
+  "
+
+
 
 par(mfrow=c(1,1))
 plot(table_pca['Proportion of Variance',], 
-     type = 'l', lwd = 5, col = 'blue', 
-     xlim = c(1,10), 
+     type = 'l', 
+     lwd = 5, 
+     col = 'blue', 
+     xlim = c(1,20), 
      ylim = c(0,.05),
      main = 'Proportion of Variance Explained by Principal Components', 
      xlab = 'Principal Components', 
@@ -320,17 +316,21 @@ pca_qda_conf_matrix <- table(pca_qda_pred, pca_test_labels)
 
 ```{r pca knn, echo=TRUE}
 
-pca_knn <- knn3Train(reduced_train[2:ncol(reduced_train)], 
+pca_knn <- knn3(label ~., data = reduced_train, k=1)
+pca_knn_preds <- predict(pca_knn, newdata = reduced_test, type = "prob")
+pca_knn_conf_matrix <- table(pca_knn_preds[,2], task1_test$label)
+#eval_metrics("KNN", pca_knn_conf_matrix)
+
+ppca_knn <- knn3Train(reduced_train[2:ncol(reduced_train)], 
                  reduced_test[2:ncol(reduced_test)], 
                  reduced_train$label, 
                  k = 1, 
-                 l = 0, 
-                 prob = FALSE, 
-                 use.all = TRUE) # this returns the assigned classes from test cases
+                 use.all = TRUE) 
+# this returns the assigned classes from test cases
 
-pca_knn_conf_matrix <- table(pca_knn, reduced_test$label)
+ppca_knn_conf_matrix <- table(ppca_knn, task1_test$label)
 
-eval_metrics("KNN", pca_knn_conf_matrix)
+rbind(eval_metrics("knn3Train", ppca_knn_conf_matrix), eval_metrics("knn3", pca_knn_conf_matrix))
 ```
 
 #### GBDT
@@ -386,6 +386,116 @@ pca_svm_predictions <- predict(pca_svmfit, reduced_test)
 
 ## T1.3
 
+Classifiers to tweak:
+- KNN 
+- GBDT 
+- Random Forest
+
+
+In this section, we bring in the validation set (15% of the data) to tune hyperparameters, settle on an optimal setup, and then reevaluate on the test set. 
+
+
+#### KNN
+
+In the *k*-Nearest Neighbor classifier, here we are tweaking the main parameter *k*, the number of neighbors taken into account in fitting the model.
+
+```{r knn k-tuning, echo=TRUE}
+knn_validation_preds <- predict(knn, newdata = task1_validation, type = "prob")
+knn_validation_conf_matrix <- table(knn_validation_preds[,2], task1_test$label)
+knn_metrics <- eval_metrics(str = "1 NN", conf = knn_validation_conf_matrix)
+
+pca_knn_validation_preds <- predict(pca_knn, newdata = reduced_validation, type = "prob")
+pca_knn_validation_conf_matrix <- table(pca_knn_validation_preds[,2], reduced_test$label)
+pca_knn_metrics <- eval_metrics(str = "1 NN", conf = pca_knn_validation_conf_matrix)
+
+for (k in 2:20){
+  model <- knn3Train(task1_train[2:ncol(task1_train)], 
+                     task1_validation[2:ncol(task1_validation)], 
+                     task1_train$label, 
+                     k=k, 
+                     prob = TRUE, 
+                     use.all=TRUE)
+  
+  pca_model <- knn3Train(reduced_train[2:ncol(reduced_train)], 
+                     reduced_validation[2:ncol(reduced_validation)], 
+                     reduced_train$label, 
+                     k=k, 
+                     prob = TRUE, 
+                     use.all=TRUE)  
+
+  conf_matrix <- table(model, task1_validation$label)
+  pca_conf_matrix <- table(pca_model, reduced_validation$label)
+  
+  
+  knn_metrics[k,] <- eval_metrics(paste(as.character(k), "NN"), conf_matrix)
+  pca_knn_metrics[k,] <- eval_metrics(paste(as.character(k), "NN"), pca_conf_matrix)
+  
+  print(k)
+}
+
+knn_metrics
+pca_knn_metrics
+
+ggplot(knn_metrics, aes(x=(1:nrow(knn_metrics)), F1)) + 
+  geom_line() +
+  geom_point() +
+  geom_vline(xintercept = which.max(knn_metrics$F1), linetype = "dashed", color = "red") + 
+  xlim(1,nrow(knn_metrics)) + 
+  xlab("Number of Neighbors") + 
+  ylab("F1 Score") +
+  ggtitle("Selecting k to Maximize F1 Score") +
+  theme_linedraw() + 
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+ggplot(pca_knn_metrics, aes(x=(1:nrow(pca_knn_metrics)), F1)) + 
+  geom_line() +
+  geom_point() +
+  geom_vline(xintercept = which.max(pca_knn_metrics$F1), linetype = "dashed", color = "blue") + 
+  xlim(1,nrow(pca_knn_metrics)) + 
+  xlab("Number of Neighbors") + 
+  ylab("F1 Score") +
+  ggtitle("Selecting k to Maximize F1 Score for Dimension-Reduced Models") +
+  theme_linedraw() + 
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+```
+
+
+```{r final knn, echo=TRUE}
+# KNN Model Predictions
+
+tuned_1nn <- knn3Train(task1_train[2:ncol(task1_train)], 
+                       task1_test[2:ncol(task1_test)], 
+                       task1_train$label, 
+                       k=5, 
+                       prob = TRUE, 
+                       use.all=TRUE)
+
+tuned_1nn_conf_matrix <- table(tuned_1nn, task1_test$label)
+
+pca_tuned_knn <- knn3Train(reduced_train[2:ncol(reduced_train)], 
+                       reduced_test[2:ncol(reduced_test)], 
+                       reduced_train$label, 
+                       k=9, 
+                       prob = TRUE, 
+                       use.all=TRUE)
+
+pca_tuned_knn_conf_matrix <- table(pca_tuned_knn, reduced_test$label)
+
+
+# knn3 method
+#ttuned_knn <- knn3(label ~., data = task1_train, k=5)
+
+#ttuned_knn_probs <- predict(ttuned_knn, newdata = task1_validation, type = "prob")
+
+#ttuned_knn_preds <-  rep(0, nrow(task1_test))
+#ttuned_knn_preds <- ifelse(ttuned_knn_probs[,2] > .5, 1, 0)
+
+#ttuned_knn_conf_matrix <- table(ttuned_knn_preds, task1_test$label)
+
+```
+
+#### Random Forest
 ```{r rf threshold selection}
 
 # Predict on the Validation Set
@@ -394,7 +504,6 @@ pca_svm_predictions <- predict(pca_svmfit, reduced_test)
 rf_validation_preds <- predict(rf, data = task1_validation[2:ncol(task1_validation)], type = "response")$predictions
 
 # Calculate PR Curves Using Validation Labels (y_val)
-
 
 # PR Curve for Lasso    Precision-Recall
 rf_validation_pr_curve <- pr.curve(scores.class0 = rf_validation_preds, weights.class0 = task1_validation$label, curve = TRUE)
@@ -412,83 +521,20 @@ rf_curve_df <- data.frame(Model = "Random Forest",
 
 
 
-```{r knn threshold selection}
-# KNN Model Predictions
-knn_validation_preds <- predict(knn, data = task1_validation[2:ncol(task1_validation)], type = "response")$predictions
-
-# Calculate PR Curves Using Validation Labels (y_val)
-
-
-# PR Curve for Lasso    Precision-Recall
-knn_validation_pr_curve <- pr.curve(scores.class0 = knn_validation_preds, weights.class0 = task1_validation$label, curve = TRUE)
-
-cat("PR AUC (Random Forest, Validation Set):", knn_validation_pr_curve$auc.integral, "\n") # output
-
-
-# Create Data Frames for Precision-Recall Curves
-knn_curve_df <- data.frame(Model = "Random Forest", 
-                          Recall = knn_validation_pr_curve$curve[, 1], 
-                          Precision = knn_validation_pr_curve$curve[, 2], 
-                          Threshold = knn_validation_pr_curve$curve[, 3])
-
-```
-
-```{r optimal thresholds}
-# Combining data frames for elastic net and lasso
-# pr_data <- bind_rows(df_1d, df_3d)
-
-
-# Compute F1 Scores and Find Optimal Thresholds
-pr_data <- pr_data %>%
-  mutate(F1 = 2 * (Precision * Recall) / (Precision + Recall + 1e-6))  # Avoid division by zero
-
-
-# Find the Optimal Threshold for Each Model
-optimal_thresholds <- pr_data %>%
-  group_by(Model) %>%
-  filter(F1 == max(F1)) %>%
-  summarize(Optimal_Threshold = Threshold[1], Max_F1 = F1[1])
-
-# Print Optimal Thresholds
-print(optimal_thresholds)
-
-```
-
-Classifiers to tweak: - KNN - GBDT - Random Forest
-
-#### KNN
-
-In the *k*-Nearest Neighbor classifier, here we are tweaking the main parameter *k*, the number of neighbors taken into account in fitting the model.
-
-```{r knn v2, echo=TRUE}
-knn_metrics <- eval_metrics(str = "1NN", conf = knn_conf_matrix)
-for (k in 2:10){
-  fit <- knn3(label ~., data = task1_train, k=k)
-  
-  predicted <- predict(fit, newdata = task1_test, type = "prob")
-  
-  conf_matrix <- table(predicted[,2], task1_test$label)
-  
-  knn_metrics[k,] <- eval_metrics(paste(as.character(k), "NN"), conf_matrix)
-}
-
-knn_metrics
-
-```
 
 #### GBDT
 
+
 One classifier to improve upon is Gradient Boosted Decision Trees, namely by tuning the hyperparameter lambda that can be thought of as a shrinkage parameter.
 
-```{r, GBTM v2, echo=TRUE}
+
+```{r, GBTM tuning from workshops, echo=TRUE}
 # Define grid of lambda (shrinkage) values to evaluate
 lambda_grid <- c(0.001, 0.01,0.03,0.05)
 
 # Initialize a vector to store test errors for each lambda
 test_errors <- numeric(length(lambda_grid))
-```
 
-```{r some workshop code for tuning}
 # Loop over each lambda value
 for (i in seq_along(lambda_grid)) {
   lambda <- lambda_grid[i]
@@ -526,6 +572,49 @@ ggplot(error_df, aes(x = lambda, y = test_error)) +
   theme_minimal()
 ```
 
+
+```{r gbdt threshold selection}
+
+# Predict on the Validation Set
+
+# Random Forest Model Predictions
+gbdt_validation_preds <- predict(gbdt, newdata = task1_validation[2:ncol(task1_validation)], n.trees = 1000, type = "response") # $predictions
+
+# Calculate PR Curves Using Validation Labels (y_val)
+
+# PR Curve for Lasso    Precision-Recall
+gbdt_validation_pr_curve <- pr.curve(scores.class0 = gbdt_validation_preds, weights.class0 = task1_validation$label, curve = TRUE)
+
+cat("PR AUC (Random Forest, Validation Set):", gbdt_validation_pr_curve$auc.integral, "\n") # output
+
+
+# Create Data Frames for Precision-Recall Curves
+gbdt_curve_df <- data.frame(Model = "Gradient Boosted Decision Trees", 
+                          Recall = gbdt_validation_pr_curve$curve[, 1], 
+                          Precision = gbdt_validation_pr_curve$curve[, 2], 
+                          Threshold = gbdt_validation_pr_curve$curve[, 3])
+
+```
+
+
+```{r gbdt optimal threshold implementation}
+
+# Compute F1 Scores and Find Optimal Thresholds
+gbdt_curve_df <- gbdt_curve_df |> mutate(F1 = 2 * (Precision * Recall) / (Precision + Recall + 1e-6))  # Avoid division by zero
+
+gbdt_threshold <- gbdt_curve_df[which.max(gbdt_curve_df$F1),4]
+
+tuned_gbdt_probs <- predict(gbdt, newdata = task1_test, n.trees = 1000, type = "response")
+
+tuned_gbdt_preds <-  rep(0, nrow(task1_test))
+tuned_gbdt_preds <- ifelse(tuned_gbdt_probs > gbdt_threshold, 1, 0)
+
+tuned_gbdt_conf_matrix <- table(tuned_gbdt_preds, task1_test$label)
+
+```
+
+
+
 ## Model Evaluation
 
 ```{r eval_metrics function, echo=TRUE}
@@ -560,7 +649,7 @@ eval_metrics <- function(str, conf){
 base_summary_table <- rbind(eval_metrics("LDA", lda_conf_matrix), 
                        c("QDA", rep(NA,3)),
                        eval_metrics("Logistic Regression", logistic_conf_matrix),
-                       eval_metrics("KNN", knn_conf_matrix),
+                       eval_metrics("1NN", knn_conf_matrix),
                        eval_metrics("Random Forest", rf_conf_matrix),
                        eval_metrics("GBDT", gbdt_conf_matrix),
                        c("SVM", rep(NA,3)))
@@ -574,6 +663,10 @@ pca_summary_table <- rbind(eval_metrics("LDA", pca_lda_conf_matrix),
                        c("SVM", rep(NA,3)))
 
 
+tuned_summary_table <- rbind(eval_metrics("5NN", tuned_1nn_conf_matrix), 
+                       eval_metrics("GBDT with Optimal Threshold", tuned_gbdt_conf_matrix),
+                       c("Random Forest", rep(NA,3)))
+
 # tuned_summary_table 
 
 
@@ -585,5 +678,11 @@ pca_summary_table <- rbind(eval_metrics("LDA", pca_lda_conf_matrix),
 #lda_roc <- roc(task1_test$label, lda_pred_full$posterior[,2], levels = c(0, 1), direction = "<")
 #auc(lda_roc)
 
+rbind(eval_metrics("1NN (Base Case)", knn_conf_matrix),
+      eval_metrics("5NN", tuned_1nn_conf_matrix),
+      eval_metrics("PCA 1NN", pca_knn_conf_matrix),
+      eval_metrics("PCA 9NN", pca_tuned_knn_conf_matrix))
 
+rbind(eval_metrics("Base RF", rf_conf_matrix),
+      eval_metrics("PCA RF", pca_rf_conf_matrix))
 ```
