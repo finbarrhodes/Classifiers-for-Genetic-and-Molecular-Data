@@ -1,0 +1,302 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-12-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+```{r}
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(ISLR)
+# STEP 1 DATA COLLECTION ---------
+
+data <- read.csv("data2.csv.gz")
+# Iterate through label and make them 0 if they are -1, 1 otherwise
+
+# STEP 1.0. DATA PREPARATION ---------
+for (i in 1:nrow(data)) {
+  if (data[i, 1] == -1) {
+    data[i, 1] <- 0  
+  } else {
+    data[i, 1] <- 1
+  }
+}
+# Find duplicate columns
+unique_data <- data[, !duplicated(as.list(data))]
+num_repeated <- ncol(data) - ncol(unique_data)
+cat("The new dataset has dimensions:", dim(unique_data), "\n")
+# Calculate row indices for each split
+set.seed(12)  # Set seed for reproducibility
+unique_data <- unique_data[sample(nrow(unique_data)), ]
+n <- nrow(unique_data)
+end_training <- floor(n * 0.7)  # 70% for training
+end_validation <- floor(n * 0.85)  # Next 10% for validation
+
+# Split the data into training, validation, and testing sets
+training_data <- unique_data[1:end_training, ]  # 70% of the data
+validation_data <- unique_data[(end_training + 1):end_validation, ]  # 10% of the data
+testing_data <- unique_data[(end_validation + 1):n, ]  # Remaining 20% of the data
+
+
+# DATA SPLITING ---------
+#create dep. var
+y_train <- training_data[,1]
+y_valid <- validation_data[,1]
+y_test <- testing_data[,1]
+#create training, validation and testing matrix with ind.var
+features_train <- training_data[,-1]
+sparse_data_train <- as(features_train, "sparseMatrix")
+features_val <- validation_data[,-1]
+sparse_data_valid <- as(features_val, "sparseMatrix")
+features_test<- testing_data[,-1]
+sparse_data_test <- as(features_test, "sparseMatrix")
+
+```
+
+```{r}
+library(xgboost)
+library(Matrix)
+library(glmnet)
+library(caTools)
+library(SparseM)
+
+# DATA CONVERTION ---------
+# Convert to DMatrix format for XGBoost
+dtrain_xg <- xgb.DMatrix(data = sparse_data_train, label = y_train)
+dvalid_xg <- xgb.DMatrix(data = sparse_data_valid, label = y_valid)
+dtest_xg <- xgb.DMatrix(data = sparse_data_test, label = y_test)
+
+```
+
+
+```{r}
+# HYPERPARAMETER TUNNING WITH CV using TRAIN data ---------
+
+# Simplified grid for essential parameters
+param_grid_xg <- expand.grid(
+  max_depth = c(4, 6, 8), # tree depth
+  eta = c(0.01 , 0.1 , 0.2 , 0.3), # Learning rate F_t+1 = eta * T_t + F_t 
+  subsample = c(0.6, 0.8), # fraction of rows
+  colsample_bytree = c(0.6, 0.8) # fraction of features
+)
+
+# Track results
+best_model_xg <- NULL
+best_logloss_xg <- Inf
+
+for (i in 1:nrow(param_grid_xg)) {
+  params_xg <- list(
+    booster = "gbtree",
+    objective = "binary:logistic",
+    eval_metric = "logloss",
+    max_depth = param_grid_xg$max_depth[i],
+    eta = param_grid_xg$eta[i],
+    subsample = param_grid_xg$subsample[i],
+    colsample_bytree = param_grid_xg$colsample_bytree[i]
+  )
+  
+  # Cross-validation for current parameters
+  cv_xg <- xgb.cv(
+    params = params_xg,
+    data = dtrain_xg,
+    nrounds = 50,              # Keep this small to limit computation
+    nfold = 5,                 # Stratified 5-fold CV
+    early_stopping_rounds = 10,
+    verbose = FALSE
+  )
+  
+  # Update the best model if logloss improves
+  min_logloss_xg <- min(cv_xg$evaluation_log$test_logloss_mean)
+  if (min_logloss_xg < best_logloss_xg) {
+    best_logloss_xg <- min_logloss_xg
+    best_model_xg <- params_xg
+  }
+}
+# STORE BEST_MODEL PARAMETERS
+
+# Initialize a data frame to store results
+if (!exists("model_results_xg")) {
+  model_results_xg <- data.frame(
+    eta = numeric(),
+    max_depth = integer(),
+    subsample = numeric(),
+    colsample_bytree = numeric(),
+    logloss = numeric(),
+    stringsAsFactors = FALSE
+  )
+}
+
+# Append the best_model parameters and log loss
+model_results_xg <- rbind(
+  model_results_xg,
+  data.frame(
+    eta = best_model_xg$eta,
+    max_depth = best_model_xg$max_depth,
+    subsample = best_model_xg$subsample,
+    colsample_bytree = best_model_xg$colsample_bytree,
+    logloss = best_logloss_xg  # Use the corresponding logloss for the best model
+  )
+)
+
+# Print the updated table
+print(model_results_xg)
+print(best_model_xg)
+
+```
+
+
+```{r}
+final_params_xg <- list(
+  booster = "gbtree",
+  objective = "binary:logistic",
+  eval_metric = "logloss",
+  eta = best_model_xg$eta,                 # Replace with the optimal eta value
+  max_depth = best_model_xg$max_depth,     # Replace with the optimal max_depth
+  subsample = best_model_xg$subsample,     # Replace with the optimal subsample value
+  colsample_bytree = best_model_xg$colsample_bytree # Replace with optimal colsample_bytree
+)
+
+# XG MODEL using TRAIN data -----------
+final_model_xg <- xgb.train(
+  params = final_params_xg, 
+  data = dtrain_xg, 
+  nrounds = 100,                        # You can adjust the number of rounds based on early stopping results
+  watchlist = list(train = dtrain_xg), 
+  early_stopping_rounds = 10,           # Stop training if no improvement is seen in 10 rounds
+  verbose = 0                           # Optional: set to 0 for silent training
+)
+
+# Make predictions on the test data
+predictions_xg_train <- predict(final_model_xg, dtrain_xg) 
+# Default THRESHOLD
+predictions_binary_xg_train <- ifelse(predictions_xg_train > 0.5, 1, 0)
+
+# Evaluate the final model
+accuracy_xg_train <- sum(predictions_binary_xg_train == y_train) / length(y_train)
+print(paste("Final Accuracy for Train data with 0.5:", accuracy_xg_train))
+
+
+conf_matrix_xg_train <- table(Predicted = predictions_binary_xg_train, Actual = y_train) # Confusion matrix train
+print("Confusion Matrix:")
+print(conf_matrix_xg_train)
+
+
+importance_matrix_xg_train <- xgb.importance(model = final_model_xg) # Feature importance
+print(importance_matrix_xg_train)
+
+top_features_xg <- importance_matrix_xg_train[1:25, ]  # Select the top 30 features
+
+# Plot the top 30 features
+xgb.plot.importance(importance_matrix = top_features_xg, 
+                    main = "Top 30 Most Important Features",
+                    xlab = "Feature Importance")
+```
+
+
+
+```{r}
+library(ggplot2)
+
+# Initialize an empty data frame to store results
+predictions_xg_valid <- predict(final_model_xg, dvalid_xg) 
+threshold_results_xg_valid <- data.frame(Threshold_xg = numeric(), BalancedAccuracy_xg = numeric())
+
+# Define a sequence of threshold values
+threshold_values_xg_valid <- seq(0, 1, by = 0.001)
+
+# Loop through each threshold value
+for (threshold_xg in threshold_values_xg_valid) {
+  # Convert probabilities to binary predictions based on the current threshold
+  predicted_classes_xg_valid <- ifelse(predictions_xg_valid > threshold_xg, 1, 0)
+  
+  # Calculate the confusion matrix
+  conf_matrix_xg_valid <- table(Predicted_xg = predicted_classes_xg_valid, Actual_xg = y_valid)
+  
+  # Extract TP, TN, FP, FN (use tryCatch for error handling in case of missing categories)
+  tn_xg <- tryCatch(conf_matrix_xg_valid[1, 1], error = function(e) 0)
+  tp_xg <- tryCatch(conf_matrix_xg_valid[2, 2], error = function(e) 0)
+  fp_xg <- tryCatch(conf_matrix_xg_valid[2, 1], error = function(e) 0)
+  fn_xg <- tryCatch(conf_matrix_xg_valid[1, 2], error = function(e) 0)
+  
+  # Calculate balanced accuracy
+  balan_acc_xg_valid <- 0.5 * (tp_xg / (tp_xg + fn_xg + 1e-6) + tn_xg / (tn_xg + fp_xg + 1e-6)) # Add small value to avoid division by zero
+  
+  # Append the results to the data frame
+  threshold_results_xg_valid <- rbind(threshold_results_xg_valid, data.frame(Threshold_xg = threshold_xg, BalancedAccuracy_xg = balan_acc_xg_valid))
+}
+
+# Print the results
+# print(threshold_results_xg)
+
+# Plot Balanced Accuracy vs Threshold
+ggplot(threshold_results_xg_valid, aes(x = Threshold_xg, y = BalancedAccuracy_xg)) +
+  geom_line(color = "blue", size = 1) +
+  geom_point(color = "red", size = 2) +
+  labs(
+    title = "Balanced Accuracy vs Threshold (XGBoost)",
+    x = "Threshold",
+    y = "Balanced Accuracy"
+  ) +
+  theme_minimal()
+
+max_balanced_accuracy_xg <- threshold_results_xg_valid[which.max(threshold_results_xg_valid$BalancedAccuracy_xg), ]
+
+# Output the results
+cat("Threshold with Maximum Balanced Accuracy (XGBoost):\n")
+cat("Threshold_xg:", max_balanced_accuracy_xg$Threshold_xg, "\n")
+cat("Balanced Accuracy_xg:", max_balanced_accuracy_xg$BalancedAccuracy_xg, "\n")
+
+```
+
+
+
+```{r}
+# BEST THRESHOLD BY VALIDATING
+# 
+predictions_xg_test <- predict(final_model_xg, dtest_xg) 
+predicted_classes_xg_test <- ifelse(predictions_xg_test > max_balanced_accuracy_xg$Threshold_xg , 1, 0)
+# TO TEST A PARTICULAR THRESHOLD:
+predicted_classes_xg_test <- ifelse(predictions_xg_test > 0.0395 , 1, 0)
+
+conf_matrix_xg_test <- table(Predicted = predicted_classes_xg_test, Actual = y_test)
+print("Confusion Matrix Test XG:")
+print(conf_matrix_xg_test)
+
+tn_xg_t = conf_matrix_xg_test[1,1]
+tp_xg_t = conf_matrix_xg_test[2,2]
+fp_xg_t = conf_matrix_xg_test[2,1]
+fn_xg_t = conf_matrix_xg_test[1,2]
+
+balan_acc_xg_test = 0.5*( tp_xg_t / (tp_xg_t+fn_xg_t) + tn_xg_t / (tn_xg_t + fp_xg_t) )
+print(balan_acc_xg_test)
+
+```
+Without validation, using Threshold = 0.5
+[1] "Confusion Matrix Test XG:"
+         Actual
+Predicted   0   1
+        0 112   3
+        1   0   5
+[1] Balanced accuracy for Test 0.8125
+------------------------------------------
+With validation, using Threshold = 0.039
+[1] "Confusion Matrix Test XG:"
+         Actual
+Predicted   0   1
+        0 107   1
+        1   5   7
+[1] Balanced accuracy for Test  0.9151786
+
+
+
