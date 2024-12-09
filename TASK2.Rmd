@@ -18,9 +18,6 @@ library(ISLR)
 data <- read.csv("data2.csv.gz")
 ```
 
-Binding: Indicates that the compound interacts or attaches effectively to the thrombin target site.(1)
-Non-binding: Indicates that the compound does not interact effectively with thrombin.(0)
-In the context of drug discovery, thrombin is a protein that could be a target for drugs aimed at affecting blood clotting, and identifying compounds that bind to thrombin can be a critical step in developing new medications.
 
 ```{r}
 set.seed(123)
@@ -52,7 +49,6 @@ ggplot(data, aes(x = data[, 1])) + geom_bar() + labs(x = "Binding Status", y = "
 ```{r}
 feature_sum <- colSums(data[, 2:100001])
 hist(feature_sum, breaks = 50, main = "Distribution of Feature Sums", xlab = "Sum of binary feature values")
-
 ```
 
 ```{r}
@@ -75,11 +71,10 @@ print(data)
 ```{r}
 # Find duplicate columns
 unique_data <- data[, !duplicated(as.list(data))]
-num_repeated <- ncol(data) - ncol(unique_data)
 cat("The new dataset has dimensions:", dim(unique_data), "\n")
 ```
 
-To compare our models we mesure their performance on unseen data. So we split the dataset in training and test
+To compare our models we mesure their performance on unseen data. So we split the dataset in training validation and test data (70,15,15)
 ```{r}
 # Calculate row indices for each split
 set.seed(12)
@@ -151,9 +146,8 @@ Plot the choice of lamda
 plot(cv_fit_1d, xvar="lambda", label= TRUE)
 plot(cv_fit_3d, xvar="lambda", label= TRUE)
 ```
-I commented the ridge regression out of the code because it keeps all the features and just makes the coefficeints smaller while the other models actually removes features by shrinking they coefficeints to 0.
 
-We compute the optimal threshold using the validation set ny computing PrAuc and F1
+We compute the optimal threshold using the validation set and the balance accurancy metric 
 ```{r} 
 library(PRROC)
 
@@ -248,7 +242,6 @@ predictions_3d_test <- predict(cv_fit_3d, sparse_data_test, s = "lambda.min", ty
 ```{r}
 # Measure performance on unseen data using the true y
 # Convert probabilities to binary predictions using the optimal threshold for each model (tuning the parameters)
-# Inthreshold
 predicted_classes_lasso <- ifelse(predictions_1d_test > 0.034, 1, 0)
 
 predicted_classes_EN <- ifelse(predictions_3d_test > 0.029, 1, 0) 
@@ -309,9 +302,7 @@ h2o.init()
 ----------- RANDOM FOREST ---------
 
 ```{r}
-# Convert training data to H2O frame
-set.seed(123)
-h2o.init(max_mem_size = "16G")
+#h2o.init(max_mem_size = "16G")
 train_h2o <- as.h2o(training_data)
 
 train_h2o[, "label"] <- as.factor(train_h2o[, "label"])
@@ -328,7 +319,8 @@ rf_model <- h2o.randomForest(
   max_depth = 15,                 # Maximum tree depth
   mtries = 1000,                  # Features considered per split
   min_rows = 20,                  # Minimum rows per leaf
-  sample_rate = 0.8               # Row sampling rate
+  sample_rate = 0.8,               # Row sampling rate
+  seed = 123 
 )
 
 # Retrieve variable importance
@@ -339,36 +331,54 @@ head(importance[order(importance$relative_importance, decreasing = TRUE), ], 75)
 
 print(importance)
 
-cumulative_importance <- 0
-selected_features <- c()
-for (i in 1:nrow(importance)) {
-  cumulative_importance <- cumulative_importance + importance$percentage[i]
-  selected_features <- c(selected_features, importance$variable[i])
-  if (cumulative_importance >= 0.95) break
-}
-print(selected_features)
 
-length(selected_features)
+cumulative_importance85 <- 0
+selected_features85 <- c()
+for (i in 1:nrow(importance)) {
+  cumulative_importance85 <- cumulative_importance85 + importance$percentage[i]
+  selected_features85 <- c(selected_features85, importance$variable[i])
+  if (cumulative_importance85 >= 0.85) break
+}
+length(selected_features85)
+
+cumulative_importance90 <- 0
+selected_features90 <- c()
+for (i in 1:nrow(importance)) {
+  cumulative_importance90 <- cumulative_importance90 + importance$percentage[i]
+  selected_features90 <- c(selected_features90, importance$variable[i])
+  if (cumulative_importance90 >= 0.9) break
+}
+length(selected_features90)
+
+cumulative_importance95 <- 0
+selected_features95 <- c()
+for (i in 1:nrow(importance)) {
+  cumulative_importance95 <- cumulative_importance95 + importance$percentage[i]
+  selected_features95 <- c(selected_features95, importance$variable[i])
+  if (cumulative_importance95 >= 0.95) break
+}
+length(selected_features95)
+
+selected_features100 <- importance[importance$scaled_importance > 0, "variable"]
+length(selected_features100)
 ```
+
 ```{r}
-rf_model_selected <- h2o.randomForest(
-  x = selected_features,
+rf_model_selected_85 <- h2o.randomForest(
+  x = selected_features85,
   y = y,
   training_frame = train_h2o,
-  ntrees = 100,
-  max_depth = 15,
-  mtries = length(selected_features),
-  min_rows = 20,
-  sample_rate = 0.8
+  ntrees = 75,               # Fewer trees for small datasets
+  max_depth = 10,             # Restrict tree depth to avoid overfitting
+  mtries = 10,               # Use sqrt(number of features) for classification
+  min_rows = 5,              # Smaller minimum rows for better splits
+  sample_rate = 0.9,          # Slightly higher sampling rate for diversity
+  seed = 123 
 )
-```
 
-
-```{r}
-library(PRROC)
 
 val_h2o <- as.h2o(validation_data[,-1])
-predictions_rf <- (h2o.predict(rf_model_selected, val_h2o))
+predictions_rf <- (h2o.predict(rf_model_selected_85, val_h2o))
 predictions_rf <- as.data.frame(predictions_rf)
 predictions_rf <- as.numeric(predictions_rf$p1)  
 
@@ -404,12 +414,396 @@ calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, mod
   return(results)
 }
 
-length(val_h2o)
+# Calculate balanced accuracy
+threshold_results_rf_85<- calculate_balanced_accuracy_1(predictions_rf, y_val, threshold_values, "Random Forest")
+
+# Find and print maximum balanced accuracy for each model
+max_balanced_accuracy_rf_85 <- threshold_results_rf_85[which.max(threshold_results_rf_85$BalancedAccuracy), ]
+
+cat(" (Random Forest (85) on Validation set):\n")
+cat("Threshold:", max_balanced_accuracy_rf_85$Threshold, "\n")
+cat("Balanced Accuracy:", max_balanced_accuracy_rf_85$BalancedAccuracy, "\n")
+
+
+```
+
+
+```{r}
+rf_model_selected_90 <- h2o.randomForest(
+  x = selected_features90,
+  y = y,
+  training_frame = train_h2o,
+  ntrees = 75,               # Fewer trees for small datasets
+  max_depth = 10,             # Restrict tree depth to avoid overfitting
+  mtries = 10,               # Use sqrt(number of features) for classification
+  min_rows = 5,              # Smaller minimum rows for better splits
+  sample_rate = 0.9,          # Slightly higher sampling rate for diversity
+  seed = 123 
+)
+
+
+val_h2o <- as.h2o(validation_data[,-1])
+predictions_rf <- (h2o.predict(rf_model_selected_90, val_h2o))
+predictions_rf <- as.data.frame(predictions_rf)
+predictions_rf <- as.numeric(predictions_rf$p1)  
+
+# Initialize data frames to store results
+threshold_results_rf <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric())
+
+# Define a sequence of threshold values
+threshold_values <- seq(0, 1, by = 0.001)
+
+# Helper function to calculate balanced accuracy for a given set of predictions and thresholds
+calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, model_name) {
+  results <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric(), Model = character())
+  
+  for (threshold in thresholds) {
+    # Convert probabilities to binary predictions
+    predicted_classes <- ifelse(predictions > threshold, 1, 0)
+    
+    # Create confusion matrix
+    conf_matrix <- table(Predicted = predicted_classes, Actual = y_actual)
+    
+    # Extract TP, TN, FP, FN (handle missing categories with tryCatch)
+    tn <- tryCatch(conf_matrix[1, 1], error = function(e) 0)
+    tp <- tryCatch(conf_matrix[2, 2], error = function(e) 0)
+    fp <- tryCatch(conf_matrix[2, 1], error = function(e) 0)
+    fn <- tryCatch(conf_matrix[1, 2], error = function(e) 0)
+    
+    # Calculate balanced accuracy
+    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) # Add small value to avoid division by zero
+    
+    # Append results
+    results <- rbind(results, data.frame(Threshold = threshold, BalancedAccuracy = balanced_acc, Model = model_name))
+  }
+  return(results)
+}
+
+# Calculate balanced accuracy
+threshold_results_rf_90<- calculate_balanced_accuracy_1(predictions_rf, y_val, threshold_values, "Random Forest")
+
+# Find and print maximum balanced accuracy for each model
+max_balanced_accuracy_rf_90 <- threshold_results_rf_90[which.max(threshold_results_rf_90$BalancedAccuracy), ]
+
+cat(" (Random Forest (90) on Validatio set:\n")
+cat("Threshold:", max_balanced_accuracy_rf_90$Threshold, "\n")
+cat("Balanced Accuracy:", max_balanced_accuracy_rf_90$BalancedAccuracy, "\n")
+
+
+```
+
+
+```{r}
+set.seed(123)
+rf_model_selected_95 <- h2o.randomForest(
+  x = selected_features95,
+  y = y,
+  training_frame = train_h2o,
+  ntrees = 75,               # Fewer trees for small datasets
+  max_depth = 10,             # Restrict tree depth to avoid overfitting
+  mtries = 10,               # Use sqrt(number of features) for classification
+  min_rows = 5,              # Smaller minimum rows for better splits
+  sample_rate = 0.9,          # Slightly higher sampling rate for diversity
+  seed = 123 
+)
+
+
+val_h2o <- as.h2o(validation_data[,-1])
+predictions_rf <- (h2o.predict(rf_model_selected_95, val_h2o))
+predictions_rf <- as.data.frame(predictions_rf)
+predictions_rf <- as.numeric(predictions_rf$p1)  
+
+# Initialize data frames to store results
+threshold_results_rf <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric())
+
+# Define a sequence of threshold values
+threshold_values <- seq(0, 1, by = 0.001)
+
+# Helper function to calculate balanced accuracy for a given set of predictions and thresholds
+calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, model_name) {
+  results <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric(), Model = character())
+  
+  for (threshold in thresholds) {
+    # Convert probabilities to binary predictions
+    predicted_classes <- ifelse(predictions > threshold, 1, 0)
+    
+    # Create confusion matrix
+    conf_matrix <- table(Predicted = predicted_classes, Actual = y_actual)
+    
+    # Extract TP, TN, FP, FN (handle missing categories with tryCatch)
+    tn <- tryCatch(conf_matrix[1, 1], error = function(e) 0)
+    tp <- tryCatch(conf_matrix[2, 2], error = function(e) 0)
+    fp <- tryCatch(conf_matrix[2, 1], error = function(e) 0)
+    fn <- tryCatch(conf_matrix[1, 2], error = function(e) 0)
+    
+    # Calculate balanced accuracy
+    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) # Add small value to avoid division by zero
+    
+    # Append results
+    results <- rbind(results, data.frame(Threshold = threshold, BalancedAccuracy = balanced_acc, Model = model_name))
+  }
+  return(results)
+}
+
+# Calculate balanced accuracy
+threshold_results_rf_95<- calculate_balanced_accuracy_1(predictions_rf, y_val, threshold_values, "Random Forest")
+
+
+# Find and print maximum balanced accuracy for each model
+max_balanced_accuracy_rf_95 <- threshold_results_rf_95[which.max(threshold_results_rf_95$BalancedAccuracy), ]
+
+cat(" (Random Forest (95) on Validation set):\n")
+cat("Threshold:", max_balanced_accuracy_rf_95$Threshold, "\n")
+cat("Balanced Accuracy:", max_balanced_accuracy_rf_95$BalancedAccuracy, "\n")
+
+```
+
+
+```{r}
+rf_model_selected_100 <- h2o.randomForest(
+  x = selected_features100,
+  y = y,
+  training_frame = train_h2o,
+  ntrees = 75,               # Fewer trees for small datasets
+  max_depth = 10,             # Restrict tree depth to avoid overfitting
+  mtries = 10,               # Use sqrt(number of features) for classification
+  min_rows = 5,              # Smaller minimum rows for better splits
+  sample_rate = 0.9,          # Slightly higher sampling rate for diversity
+  seed = 123 
+)
+
+
+val_h2o <- as.h2o(validation_data[,-1])
+predictions_rf <- (h2o.predict(rf_model_selected_100, val_h2o))
+predictions_rf <- as.data.frame(predictions_rf)
+predictions_rf <- as.numeric(predictions_rf$p1)  
+
+# Initialize data frames to store results
+threshold_results_rf <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric())
+
+# Define a sequence of threshold values
+threshold_values <- seq(0, 1, by = 0.001)
+
+# Helper function to calculate balanced accuracy for a given set of predictions and thresholds
+calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, model_name) {
+  results <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric(), Model = character())
+  
+  for (threshold in thresholds) {
+    # Convert probabilities to binary predictions
+    predicted_classes <- ifelse(predictions > threshold, 1, 0)
+    
+    # Create confusion matrix
+    conf_matrix <- table(Predicted = predicted_classes, Actual = y_actual)
+    
+    # Extract TP, TN, FP, FN (handle missing categories with tryCatch)
+    tn <- tryCatch(conf_matrix[1, 1], error = function(e) 0)
+    tp <- tryCatch(conf_matrix[2, 2], error = function(e) 0)
+    fp <- tryCatch(conf_matrix[2, 1], error = function(e) 0)
+    fn <- tryCatch(conf_matrix[1, 2], error = function(e) 0)
+    
+    # Calculate balanced accuracy
+    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) # Add small value to avoid division by zero
+    
+    # Append results
+    results <- rbind(results, data.frame(Threshold = threshold, BalancedAccuracy = balanced_acc, Model = model_name))
+  }
+  return(results)
+}
+
+# Calculate balanced accuracy
+threshold_results_rf_100<- calculate_balanced_accuracy_1(predictions_rf, y_val, threshold_values, "Random Forest")
+
+# Find and print maximum balanced accuracy for each model
+max_balanced_accuracy_rf_100 <- threshold_results_rf_90[which.max(threshold_results_rf_100$BalancedAccuracy), ]
+
+cat(" (Random Forest (100) on Validatio set:\n")
+cat("Threshold:", max_balanced_accuracy_rf_100$Threshold, "\n")
+cat("Balanced Accuracy:", max_balanced_accuracy_rf_100$BalancedAccuracy, "\n")
+
+```
+
+
+
+Summarize for the different variables= amount
+```{r}
+# Combine results for plotting balanced accuracy over thresholds on validation set
+threshold_results_rf_85$Model <- "RF (85%)"
+threshold_results_rf_90$Model <- "RF (90%)"
+threshold_results_rf_95$Model <- "RF (95%)"
+threshold_results_rf_100$Model <- "RF (100%)"
+
+threshold_results <- rbind(threshold_results_rf_85, threshold_results_rf_90, threshold_results_rf_95, threshold_results_rf_100)
+
+
+# Plot Balanced Accuracy vs Threshold
+ggplot(threshold_results, aes(x = Threshold, y = BalancedAccuracy, color= Model)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Balanced Accuracy vs Threshold",
+    x = "Threshold",
+    y = "Balanced Accuracy"
+  ) +
+  theme_minimal()
+
+model_results_rf <- data.frame(
+  Model = character(),
+  BalancedAccuracy = numeric(),
+  NumFeatures = numeric()
+)
+
+# Performance on validation set
+model_results_rf <- rbind(model_results_rf, data.frame(Model = "Random Forest with 85% importance features", BalancedAccuracy = max_balanced_accuracy_rf_85$BalancedAccuracy, NumFeatures = length(selected_features85)))
+model_results_rf <- rbind(model_results_rf, data.frame(Model = "Random Forest with 90% importance features", BalancedAccuracy = max_balanced_accuracy_rf_90$BalancedAccuracy, NumFeatures = length(selected_features90)))
+model_results_rf <- rbind(model_results_rf, data.frame(Model = "Random Forest with 95% importance features", BalancedAccuracy = max_balanced_accuracy_rf_95$BalancedAccuracy, NumFeatures = length(selected_features95)))
+model_results_rf <- rbind(model_results_rf, data.frame(Model = "Random Forest with 100% importance features", BalancedAccuracy = max_balanced_accuracy_rf_100$BalancedAccuracy, NumFeatures = length(selected_features100)))
+
+# View the updated data frame
+print(model_results_rf)
+
+```
+```{r}
+
+# Make predictions on the test data to mesure performance
+test_h2o <- as.h2o(testing_data[,-1])
+predictions_rf90 <- (h2o.predict(rf_model_selected_90, test_h2o))
+predictions_rf90 <- as.data.frame(predictions_rf90)
+predictions_rf90 <- as.numeric(predictions_rf90$p1)  
+
+predicted_classes_RF_90 <- ifelse(predictions_rf90 > max_balanced_accuracy_rf_90$Threshold, 1, 0) #Using optimal threshold
+
+conf_matrix_RF_90 <- table(Predicted =  predicted_classes_RF_90 , Actual = y_true)
+print("Confusion Matrix Random Forest (90):")
+print(conf_matrix_RF_90)
+
+balanced_accuracy_RF_90 <- calculate_balanced_accuracy(conf_matrix_RF_90)
+cat("The Balanced Accuracy of Random Forest (90) on the test set is:", balanced_accuracy_RF_90, "\n")
+
+```
+
+
+```{r}
+# Initialize an empty data frame
+model_results <- data.frame(
+  Model = character(),
+  BalancedAccuracy = numeric(),
+  NumFeatures = numeric()
+)
+
+# Add results dynamically
+model_results <- rbind(model_results, data.frame(Model = "Lasso", BalancedAccuracy = balanced_accuracy_L, NumFeatures = length(selected_features_nonzero_1d)))
+model_results <- rbind(model_results, data.frame(Model = "Elastic Net", BalancedAccuracy = balanced_accuracy_EN, NumFeatures = length(selected_features_nonzero_3d)))
+model_results <- rbind(model_results, data.frame(Model = "Random Forest (Optimal)", BalancedAccuracy = balanced_accuracy_RF_90, NumFeatures = length(selected_features90)))
+
+# View the updated data frame
+print(model_results)
+```
+
+
+
+```{r}
+
+# Convert training and validation data to H2O frames
+train_h2o <- as.h2o(training_data)
+val_h2o <- as.h2o(validation_data)
+train_h2o[, y] <- as.factor(train_h2o[, y])  # Convert the response column in training set to factor
+val_h2o[, y] <- as.factor(val_h2o[, y])      # Convert the response column in validation set to factor
+
+# Ensure the response column is correctly set
+train_h2o[, "label"] <- as.factor(train_h2o[, "label"])  # Convert to factor for classification
+val_h2o[, "label"] <- as.factor(val_h2o[, "label"])      # Convert to factor for classification
+
+# Define predictors and response
+x <- setdiff(h2o.colnames(train_h2o), "label")  # All columns except the target
+y <- "label"
+
+set.seed(123)
+# Train the H2O GBM model
+gbm_model <- h2o.gbm(
+  x = x,
+  y = y,
+  training_frame = train_h2o,
+  validation_frame = val_h2o,
+  ntrees = 100,
+  max_depth = 8,
+  learn_rate = 0.05,
+  sample_rate = 0.8,
+  col_sample_rate = 0.8,
+  stopping_rounds = 5,
+  stopping_metric = "AUC"
+)
+
+# Retrieve variable importance
+importance_gbm <- h2o.varimp(gbm_model)
+importance_gbm
+# Plot variable importance
+h2o.varimp_plot(gbm_model, num_of_features = 5) 
+
+cumulative_importance_gbm <- 0
+selected_features_gbm <- c()
+for (i in 1:nrow(importance_gbm)) {
+  cumulative_importance_gbm <- cumulative_importance_gbm + importance_gbm$percentage[i]
+  selected_features_gbm <- c(selected_features_gbm, importance_gbm$variable[i])
+  if (cumulative_importance_gbm >= 0.95) break
+}
+print(length(selected_features_gbm))
+
+
+gbm_model_selected <- h2o.gbm(
+  x = selected_features_gbm,         # Only the selected features
+  y = y,                         # Response variable
+  training_frame = train_h2o,    # Original training data
+  validation_frame = val_h2o,    # Original validation data
+  ntrees = 100,
+  max_depth = 10,
+  learn_rate = 0.005,
+  sample_rate = 0.3,
+  col_sample_rate = 0.3,
+  stopping_rounds = 5,
+  stopping_metric = "AUC"
+)
+
+
+predictions_gbm <- (h2o.predict(gbm_model_selected, val_h2o))
+predictions_gbm <- as.data.frame(predictions_gbm)
+predictions_gbm <- as.numeric(predictions_gbm$p1)  
+
+# Initialize data frames to store results
+threshold_results_gbm <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric())
+
+# Define a sequence of threshold values
+threshold_values <- seq(0, 1, by = 0.001)
+
+# Helper function to calculate balanced accuracy for a given set of predictions and thresholds
+calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, model_name) {
+  results <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric(), Model = character())
+  
+  for (threshold in thresholds) {
+    # Convert probabilities to binary predictions
+    predicted_classes <- ifelse(predictions > threshold, 1, 0)
+    
+    # Create confusion matrix
+    conf_matrix <- table(Predicted = predicted_classes, Actual = y_actual)
+    
+    # Extract TP, TN, FP, FN (handle missing categories with tryCatch)
+    tn <- tryCatch(conf_matrix[1, 1], error = function(e) 0)
+    tp <- tryCatch(conf_matrix[2, 2], error = function(e) 0)
+    fp <- tryCatch(conf_matrix[2, 1], error = function(e) 0)
+    fn <- tryCatch(conf_matrix[1, 2], error = function(e) 0)
+    
+    # Calculate balanced accuracy
+    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) # Add small value to avoid division by zero
+    
+    # Append results
+    results <- rbind(results, data.frame(Threshold = threshold, BalancedAccuracy = balanced_acc, Model = model_name))
+  }
+  return(results)
+}
+
 # Calculate balanced accuracy for Lasso and Elastic Net
-threshold_results_rf<- calculate_balanced_accuracy_1(predictions_rf, y_val, threshold_values, "Random Forest")
+threshold_results_gbm<- calculate_balanced_accuracy_1(predictions_gbm, y_val, threshold_values, "Gradient boosting method")
 
 # Combine results for plotting
-threshold_results <- rbind(threshold_results_rf, threshold_results_EN, threshold_results_L)
+threshold_results <- rbind(threshold_results_gbm) #, threshold_results_rf, threshold_results_EN, threshold_results_L)
 
 
 # Plot Balanced Accuracy vs Threshold
@@ -424,43 +818,31 @@ ggplot(threshold_results, aes(x = Threshold, y = BalancedAccuracy, color= Model)
   theme_minimal()
 
 # Find and print maximum balanced accuracy for each model
-max_balanced_accuracy_L <- threshold_results_L[which.max(threshold_results_L$BalancedAccuracy), ]
-max_balanced_accuracy_EN <- threshold_results_EN[which.max(threshold_results_EN$BalancedAccuracy), ]
+max_balanced_accuracy_gbm <- threshold_results_gbm[which.max(threshold_results_gbm$BalancedAccuracy), ]
 
-cat("Maximum Balanced Accuracy (Random Forest):\n")
-cat("Threshold:", max_balanced_accuracy_L$Threshold, "\n")
-cat("Balanced Accuracy:", max_balanced_accuracy_L$BalancedAccuracy, "\n")
-
+cat(" (Gradient Boosting Methods):\n")
+cat("Threshold:", max_balanced_accuracy_gbm$Threshold, "\n")
+cat("Balanced Accuracy:", max_balanced_accuracy_gbm$BalancedAccuracy, "\n")
 
 
-```
-
-
-```{r}
-# Make predictions on the test data to mesure performance
 test_h2o <- as.h2o(testing_data[,-1])
-predictions_rf <- (h2o.predict(rf_model_selected, test_h2o))
-predictions_rf <- as.data.frame(predictions_rf)
-predictions_rf <- as.numeric(predictions_rf$p1)  
 
-```
+predictions_gbm <- (h2o.predict(gbm_model_selected, test_h2o))
+predictions_gbm <- as.data.frame(predictions_gbm)
+predictions_gbm <- as.numeric(predictions_gbm$p1)  
+
+predicted_classes_gbm <- ifelse(predictions_gbm > 0.082, 1, 0) #Using optimal threshold
+
+conf_matrix_gbm <- table(Predicted =  predicted_classes_gbm , Actual = y_true)
+print("Confusion Matrix Gradient Boosting Method:")
+print(conf_matrix_gbm)
 
 
-```{r}
-predicted_classes_RF <- ifelse(predictions_rf > 0.034, 1, 0) #Using optimal threshold
-```
-
-```{r}
-conf_matrix_RF <- table(Predicted =  predicted_classes_RF , Actual = y_true)
-print("Confusion Matrix Random Forest:")
-print(conf_matrix_RF)
-```
-
-```{r}
-cat("The Balanced Accuracy of Lasso on the test set is:", balanced_accuracy_L, "\n")
-cat("The Balanced Accuracy of Elastic Net on the test set is:", balanced_accuracy_EN, "\n")
-balanced_accuracy_RF <- calculate_balanced_accuracy(conf_matrix_RF)
-cat("The Balanced Accuracy of Random Forest on the test set is:", balanced_accuracy_RF, "\n")
+#cat("The Balanced Accuracy of Lasso on the test set is:", balanced_accuracy_L, "\n")
+#cat("The Balanced Accuracy of Elastic Net on the test set is:", balanced_accuracy_EN, "\n")
+#cat("The Balanced Accuracy of Random Forest on the test set is:", balanced_accuracy_RF, "\n")
+balanced_accuracy_gbm <- calculate_balanced_accuracy(conf_matrix_gbm)
+cat("The Balanced Accuracy of Gradient Boosting Method on the test set is:", balanced_accuracy_gbm, "\n")
 ```
 
 
@@ -476,10 +858,113 @@ model_results <- data.frame(
 model_results <- rbind(model_results, data.frame(Model = "Lasso", BalancedAccuracy = balanced_accuracy_L, NumFeatures = length(selected_features_nonzero_1d)))
 model_results <- rbind(model_results, data.frame(Model = "Elastic Net", BalancedAccuracy = balanced_accuracy_EN, NumFeatures = length(selected_features_nonzero_3d)))
 model_results <- rbind(model_results, data.frame(Model = "Random Forest", BalancedAccuracy = balanced_accuracy_RF, NumFeatures = length(selected_features)))
+model_results <- rbind(model_results, data.frame(Model = "Gradient Boosting Method", BalancedAccuracy = balanced_accuracy_gbm, NumFeatures =  length(selected_features_gbm)))
+
 # View the updated data frame
 print(model_results)
 ```
 
+
+
+If we choose for random forest to have the same amount of features as Lasso or elastic net, we get:
+```{r}
+set.seed(123)
+selected_features_34 <- c()
+for (i in 1:34) {
+  selected_features_34 <- c(selected_features_34, importance$variable[i])
+}
+print(selected_features_34)
+
+length(selected_features_34)
+
+rf_model_selected_34 <- h2o.randomForest(
+  x = selected_features_34,
+  y = y,
+  training_frame = train_h2o,
+  ntrees = 70,               # Fewer trees to prevent overfitting
+  max_depth = 8,             # Restrict tree depth for better generalization
+  mtries = -1,               # Feature subsampling
+  min_rows = 5,              # Allow finer splits
+  sample_rate = 0.8          # Retain 80% row sampling
+)
+
+
+library(PRROC)
+
+val_h2o <- as.h2o(validation_data[,-1])
+predictions_rf_34 <- (h2o.predict(rf_model_selected_34, val_h2o))
+predictions_rf_34 <- as.data.frame(predictions_rf_34)
+predictions_rf_34 <- as.numeric(predictions_rf_34$p1)  
+
+# Initialize data frames to store results
+threshold_results_rf <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric())
+
+# Define a sequence of threshold values
+threshold_values <- seq(0, 1, by = 0.001)
+
+# Helper function to calculate balanced accuracy for a given set of predictions and thresholds
+calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, model_name) {
+  results <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric(), Model = character())
+  
+  for (threshold in thresholds) {
+    # Convert probabilities to binary predictions
+    predicted_classes <- ifelse(predictions > threshold, 1, 0)
+    
+    # Create confusion matrix
+    conf_matrix <- table(Predicted = predicted_classes, Actual = y_actual)
+    
+    # Extract TP, TN, FP, FN (handle missing categories with tryCatch)
+    tn <- tryCatch(conf_matrix[1, 1], error = function(e) 0)
+    tp <- tryCatch(conf_matrix[2, 2], error = function(e) 0)
+    fp <- tryCatch(conf_matrix[2, 1], error = function(e) 0)
+    fn <- tryCatch(conf_matrix[1, 2], error = function(e) 0)
+    
+    # Calculate balanced accuracy
+    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) 
+    
+    # Append results
+    results <- rbind(results, data.frame(Threshold = threshold, BalancedAccuracy = balanced_acc, Model = model_name))
+  }
+  return(results)
+}
+
+threshold_results_rf_34<- calculate_balanced_accuracy_1(predictions_rf_34, y_val, threshold_values, "Random Forest")
+
+# Combine results for plotting
+threshold_results_34 <- rbind(threshold_results_rf_34, threshold_results_L)
+
+
+# Plot Balanced Accuracy vs Threshold
+
+ggplot(threshold_results_34, aes(x = Threshold, y = BalancedAccuracy, color= Model)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Balanced Accuracy vs Threshold",
+    x = "Threshold",
+    y = "Balanced Accuracy"
+  ) +
+  theme_minimal()
+
+# Find and print maximum balanced accuracy for each model
+max_balanced_accuracy_rf_34 <- threshold_results_34[which.max(threshold_results_rf_34$BalancedAccuracy), ]
+
+cat("Random Forest with the same amount of featurues as lasso")
+cat("Threshold:", max_balanced_accuracy_rf_34$Threshold, "\n")
+cat("Balanced Accuracy:", max_balanced_accuracy_rf_34$BalancedAccuracy, "\n")
+
+predictions_rf_34 <- (h2o.predict(rf_model_selected_34, test_h2o))
+predictions_rf_34 <- as.data.frame(predictions_rf_34)
+predictions_rf_34 <- as.numeric(predictions_rf_34$p1)  
+
+predicted_classes_RF_34 <- ifelse(predictions_rf_34 > 0.104, 1, 0)               #Using optimal threshold
+conf_matrix_RF_34 <- table(Predicted =  predicted_classes_RF_34 , Actual = y_true)
+print("Confusion Matrix Random Forest:")
+print(conf_matrix_RF_34)
+
+balanced_accuracy_RF_34 <- calculate_balanced_accuracy(conf_matrix_RF_34)
+cat("The Balanced Accuracy of Random Forest on the test set is:", balanced_accuracy_RF_34, "\n")
+cat("The Balanced Accuracy of Lasso with 34 features on the test set is:", balanced_accuracy_L, "\n")
+```
 
 
 
