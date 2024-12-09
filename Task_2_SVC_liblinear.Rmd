@@ -1,0 +1,281 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-12-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(ISLR)
+data <- read.csv("data2.csv.gz")
+# Iterate through label and make them 0 if they are -1, 1 otherwise
+for (i in 1:nrow(data)) {
+  if (data[i, 1] == -1) {
+    data[i, 1] <- 0  
+  } else {
+    data[i, 1] <- 1
+  }
+}
+# Find duplicate columns
+unique_data <- data[, !duplicated(as.list(data))]
+num_repeated <- ncol(data) - ncol(unique_data)
+cat("The new dataset has dimensions:", dim(unique_data), "\n")
+# Calculate row indices for each split
+set.seed(12)  # Set seed for reproducibility
+unique_data <- unique_data[sample(nrow(unique_data)), ]
+n <- nrow(unique_data)
+end_training <- floor(n * 0.7)  # 70% for training
+end_validation <- floor(n * 0.85)  # Next 10% for validation
+
+# Split the data into training, validation, and testing sets
+training_data <- unique_data[1:end_training, ]  # 70% of the data
+validation_data <- unique_data[(end_training + 1):end_validation, ]  # 10% of the data
+testing_data <- unique_data[(end_validation + 1):n, ]  # Remaining 20% of the data
+```
+
+
+```{r}
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(ISLR)
+#DATA
+set.seed(12)
+#create dep. var
+y_train <- training_data[,1]
+y_valid <- validation_data[,1]
+y_test <- testing_data[,1]
+features_train <- training_data[,-1]
+sparse_data_train <- as(features_train, "sparseMatrix")
+features_valid <- validation_data[,-1]
+sparse_data_valid <- as(features_valid, "sparseMatrix")
+features_test<- testing_data[,-1]
+sparse_data_test <- as(features_test, "sparseMatrix")
+
+# -----------
+if (!require("LiblineaR")) install.packages("LiblineaR")
+if (!require("Matrix")) install.packages("Matrix")
+
+# Load libraries
+library(SparseM)
+library(LiblineaR)
+library(Matrix)
+
+# y_train <- as.factor(y_train)  # Convert to factor if it's classification
+
+tryTypes=c(1,2,3,4,6)
+tryCosts=c(1000, 100, 10 , 1, 0.1, 0.001)
+bestCost=NA
+bestAcc=0
+bestType=NA
+for(ty in tryTypes){
+  for(co in tryCosts){
+  acc=LiblineaR(data=sparse_data_train,target=y_train ,type=ty,cost=co,bias=0,cross=5,verbose=FALSE)
+
+  if(acc>bestAcc){
+    bestCost=co
+    bestAcc=acc
+    bestType=ty
+  }
+  }
+}
+
+cat("Best model type is:",bestType,"\n")
+cat("Best cost is:",bestCost,"\n")
+cat("Best accuracy is:",bestAcc,"\n")
+
+
+# -----------
+#First model
+bestType <- 6
+final_model_svm <- LiblineaR( data=sparse_data_train , target=y_train ,type=bestType,cost=bestCost,bias=0,verbose=FALSE)
+weights_svm <- round(final_model_svm$W, digits = 6)
+#Pick features
+feature_impor_svm <- abs(weights_svm)
+feature_rank_svm <- order(feature_impor_svm, decreasing = T)
+
+#First model
+k_fea <- 100
+# Initialize variables
+k_values <- seq(200, 300, by = 20)  # Test k_fea values from 100 to 1000 in steps of 100
+max_balanced_acc <- -Inf             # To store the maximum balanced accuracy
+best_k_fea <- NULL                   # To store the best k_fea
+df_data_train <- as.data.frame(as.matrix(sparse_data_train))
+
+# Iterate over different values of k_fea
+for (k_fea in k_values) {
+  # Step 1: Select the top k features
+  top_k_fea <- feature_rank_svm[1:k_fea]
+  top_k_wei <- weights_svm[top_k_fea]
+  
+  # Step 2: Change data for the model
+
+  df_data_train_selected <- df_data_train[, top_k_fea, drop = FALSE]
+  sparse_data_train_svm_red <- as(as.matrix(df_data_train_selected), "dgCMatrix")
+  
+  # Step 3: Train the model
+  final_model_svm_red <- LiblineaR(
+    data = sparse_data_train_svm_red,
+    target = y_train,
+    type = 6,
+    cost = bestCost,
+    bias = 0,
+    verbose = FALSE
+  )
+  
+  # Step 4: Make predictions on the validation data
+  predictions_svm_valid_list <- predict( final_model_svm_red , sparse_data_valid, proba = TRUE)
+  
+  # Step 5: Compute the confusion matrix
+  conf_matrix_svm_valid <- table( Predicted = predictions_svm_valid_list$predictions , Actual = y_valid )
+  
+  tn_svm_v <- conf_matrix_svm_valid[1, 1]
+  tp_svm_v <- conf_matrix_svm_valid[2, 2]
+  fp_svm_v <- conf_matrix_svm_valid[2, 1]
+  fn_svm_v <- conf_matrix_svm_valid[1, 2]
+  
+  # Step 6: Compute the balanced accuracy
+  balan_acc_svm_valid <- 0.5 * (tp_svm_v / (tp_svm_v + fn_svm_v) + tn_svm_v / (tn_svm_v + fp_svm_v))
+  
+  # Step 7: Update the maximum balanced accuracy and best k_fea
+  if (balan_acc_svm_valid > max_balanced_acc) {
+    max_balanced_acc <- balan_acc_svm_valid
+    best_k_fea <- k_fea
+  }
+  
+  # Print the current k_fea and its balanced accuracy
+  cat("k_fea:", k_fea, "Balanced Accuracy:", balan_acc_svm_valid, "\n")
+}
+
+# Output the best k_fea and corresponding maximum balanced accuracy
+cat("Best k_fea:", best_k_fea, "with Balanced Accuracy:", max_balanced_acc, "\n")
+  
+# ------------- Given the defined k, calculates
+
+k_fea <- best_k_fea
+top_k_fea <- feature_rank_svm[1:k_fea]
+top_k_wei <- weights_svm[top_k_fea]
+  
+  # Step 2: Change data for the model
+
+df_data_train_selected <- df_data_train[, top_k_fea, drop = FALSE]
+sparse_data_train_svm_red <- as(as.matrix(df_data_train_selected), "dgCMatrix")
+  
+  # Step 3: Train the model
+final_model_svm_red_sel <- LiblineaR(
+  data = sparse_data_train_svm_red,
+  target = y_train,
+  type = 6,
+  cost = bestCost,
+  bias = 0,
+  verbose = FALSE
+)
+  
+  # Step 4: Make predictions on the validation data
+predictions_svm_valid_list_k <- predict( final_model_svm_red_sel , sparse_data_valid, proba = TRUE)
+  
+  # Step 5: Compute the confusion matrix
+conf_matrix_svm_valid_k <- table( Predicted = predictions_svm_valid_list_k$predictions , Actual = y_valid )
+  
+tn_svm_v <- conf_matrix_svm_valid_k[1, 1]
+tp_svm_v <- conf_matrix_svm_valid_k[2, 2]
+fp_svm_v <- conf_matrix_svm_valid_k[2, 1]
+fn_svm_v <- conf_matrix_svm_valid_k[1, 2]
+  
+  # Step 6: Compute the balanced accuracy
+balan_acc_svm_valid <- 0.5 * (tp_svm_v / (tp_svm_v + fn_svm_v) + tn_svm_v / (tn_svm_v + fp_svm_v))
+
+cat("k_fea:", k_fea, "Balanced Accuracy:", balan_acc_svm_valid, "\n")
+print(conf_matrix_svm_valid)
+
+#----------------- DETERMINE OPTIMAL THRESHOLD with Y_VALID
+library(ggplot2)
+
+# Initialize an empty data frame to store results
+threshold_results_svm <- data.frame(Threshold_svm = numeric(), BalancedAccuracy_svm = numeric())
+
+# Define a sequence of threshold values
+threshold_values_svm <- seq(0,1, by = 0.001)
+final_model_svm_red <- LiblineaR(data=sparse_data_train_svm_red,target=y_train,type=bestType,cost=bestCost,bias=0,verbose=FALSE)
+predictions_svm_valid_list <- predict(final_model_svm_red, sparse_data_valid, proba = T) #CHANGE TEST INTO VALIDATE
+predictions_svm_valid <- predictions_svm_valid_list$probabilities[, 2]
+
+# Loop through each threshold value
+for (threshold_svm in threshold_values_svm) {
+  # Convert probabilities to binary predictions based on the current threshold
+  predicted_classes_svm <- ifelse(predictions_svm_valid > threshold_svm, 1, 0)
+  
+  # Calculate the confusion matrix
+  conf_matrix_svm <- table(Predicted_svm = predicted_classes_svm, Actual_xg = y_valid) #WHAT DATA Y
+  
+  # Extract TP, TN, FP, FN (use tryCatch for error handling in case of missing categories)
+  tn_svm <- tryCatch(conf_matrix_svm[1, 1], error = function(e) 0)
+  tp_svm <- tryCatch(conf_matrix_svm[2, 2], error = function(e) 0)
+  fp_svm <- tryCatch(conf_matrix_svm[2, 1], error = function(e) 0)
+  fn_svm <- tryCatch(conf_matrix_svm[1, 2], error = function(e) 0)
+  
+  # Calculate balanced accuracy
+  balan_acc_svm <- 0.5 * (tp_svm / (tp_svm + fn_svm + 1e-6) + tn_svm / (tn_svm + fp_svm + 1e-6)) # Add small value to avoid division 0
+  
+  # Append the results to the data frame
+  threshold_results_svm <- rbind(threshold_results_svm, data.frame(Threshold_svm = threshold_svm, BalancedAccuracy_svm = balan_acc_svm))
+}
+
+# Print the results
+# print(threshold_results_xg)
+
+# Plot Balanced Accuracy vs Threshold
+ggplot(threshold_results_svm, aes(x = Threshold_svm, y = BalancedAccuracy_svm)) +
+  geom_line(color = "blue", size = 1) +
+  geom_point(color = "red", size = 2) +
+  labs(
+    title = "Balanced Accuracy vs Threshold with Maximum Balanced Accuracy (SVM with", k_fea, " features)",
+    x = "Threshold",
+    y = "Balanced Accuracy"
+  ) +
+  theme_minimal()
+
+max_balanced_accuracy_svm <- threshold_results_svm[which.max(threshold_results_svm$BalancedAccuracy_svm), ]
+
+# Output the results
+cat("Threshold with Maximum Balanced Accuracy (SVM with", k_fea, " features):\n")
+cat("Threshold_SVM:", max_balanced_accuracy_svm$Threshold_svm, "\n")
+cat("Balanced Accuracy_SVM_for best Threshold in y_valid:", max_balanced_accuracy_svm$BalancedAccuracy_svm, "\n")
+
+# --------------------------------------------
+predictions_svm_test_list <- predict(final_model_svm_red, sparse_data_test, proba = T) #CHANGE TEST INTO VALIDATE
+predictions_svm_test <- predictions_svm_test_list$probabilities[, 2]
+
+
+predicted_classes_svm_test <- ifelse(predictions_svm_test > max_balanced_accuracy_svm$Threshold_svm , 1, 0)
+# TO TEST A PARTICULAR THRESHOLD:
+# predicted_classes_xg_test <- ifelse(predictions_xg > 0.5 , 1, 0)
+
+conf_matrix_svm_test <- table(Predicted = predicted_classes_svm_test, Actual = y_test)
+print("Confusion Matrix Test SVM:")
+print(conf_matrix_svm_test)
+
+tn_svm_t = conf_matrix_svm_test[1,1]
+tp_svm_t = conf_matrix_svm_test[2,2]
+fp_svm_t = conf_matrix_svm_test[2,1]
+fn_svm_t = conf_matrix_svm_test[1,2]
+
+balan_acc_svm_test = 0.5*( tp_svm_t / (tp_svm_t+fn_svm_t) + tn_svm_t / (tn_svm_t + fp_svm_t) )
+print(balan_acc_svm_test)
+
+
+```

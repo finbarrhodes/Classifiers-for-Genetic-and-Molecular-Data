@@ -1,0 +1,321 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-12-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(ISLR)
+data <- read.csv("data2.csv.gz")
+# Iterate through label and make them 0 if they are -1, 1 otherwise
+for (i in 1:nrow(data)) {
+  if (data[i, 1] == -1) {
+    data[i, 1] <- 0  
+  } else {
+    data[i, 1] <- 1
+  }
+}
+```
+
+
+```{r}
+# Find duplicate columns
+unique_data <- data[, !duplicated(as.list(data))]
+num_repeated <- ncol(data) - ncol(unique_data)
+cat("The new dataset has dimensions:", dim(unique_data), "\n")
+# Calculate row indices for each split
+set.seed(12)  # Set seed for reproducibility
+unique_data <- unique_data[sample(nrow(unique_data)), ]
+n <- nrow(unique_data)
+end_training <- floor(n * 0.7)  # 70% for training
+end_validation <- floor(n * 0.85)  # Next 10% for validation
+
+# Split the data into training, validation, and testing sets
+training_data <- unique_data[1:end_training, ]  # 70% of the data
+validation_data <- unique_data[(end_training + 1):end_validation, ]  # 10% of the data
+testing_data <- unique_data[(end_validation + 1):n, ]  # Remaining 20% of the data
+
+print(sum(training_data[,1]))
+print(sum(validation_data[,1])) 
+print(sum(testing_data[,1]))
+```
+
+
+```{r}
+# Install dependencies
+install.packages(c("RCurl", "jsonlite"))
+
+# Download and install the latest H2O package from H2O.ai
+install.packages("h2o", repos = c("https://h2o-release.s3.amazonaws.com/h2o/latest_stable/R"))
+
+```
+
+
+```{r}
+#h2o.shutdown(prompt = FALSE)
+options(java.parameters = "-Dai.h2o.disable.xgboost=true")
+library(h2o)
+h2o.init()
+```
+
+
+
+
+
+```{r}
+# Load the necessary libraries
+library(h2o)
+
+# Initialize H2O with 16GB of memory (adjust if necessary)
+h2o.init(max_mem_size = "16G")
+
+# Convert the training, validation, and test data to H2O frames
+train_h2o <- as.h2o(training_data)
+valid_h2o <- as.h2o(validation_data)
+test_h2o <- as.h2o(testing_data)
+
+# Ensure the target variable "label" is a factor for classification tasks
+train_h2o[, "label"] <- as.factor(train_h2o[, "label"])
+valid_h2o[, "label"] <- as.factor(valid_h2o[, "label"])
+test_h2o[, "label"] <- as.factor(test_h2o[, "label"])
+
+# Define the feature columns (x) and the target column (y)
+x <- colnames(training_data)[-which(names(training_data) == "label")]  # All columns except the target
+y <- "label"  # Target column
+
+# ---------------------------
+# Train the SVM model with fixed gamma and hyper_param (penalty parameter C)
+
+# Set low computational cost hyperparameters
+gamma_value <- 0.000001     # Example small gamma value
+cost_value <- 10000         # Example small cost (penalty parameter)
+
+# Train the SVM model using h2o.psvm with validation_frame
+svm_model_h2o_svm <- h2o.psvm(
+  x = x,
+  y = y,
+  training_frame = train_h2o,
+  validation_frame = valid_h2o,  # Include validation frame for monitoring performance
+  kernel_type = "gaussian",      # Gaussian (RBF) kernel
+  gamma = gamma_value,
+  hyper_param = cost_value,
+  max_iterations = 100,          # Limit the number of iterations to reduce computation time
+  seed = 123                     # Set seed for reproducibility
+)
+
+# ---------------------------
+# Print model details
+print(svm_model_h2o_svm)
+
+# ---------------------------
+# Make Predictions on the Test Data
+
+predictions_test_h2o_svm <- h2o.predict(svm_model_h2o_svm, test_h2o)
+
+# Convert predictions to an R vector
+predicted_classes <- as.vector(predictions_test_h2o_svm$predict)
+actual_classes <- as.vector(test_h2o$label)
+
+# ---------------------------
+# Compute the Confusion Matrix
+
+conf_matrix <- table(Predicted = predicted_classes, Actual = actual_classes)
+print("Confusion Matrix (Test):")
+print(conf_matrix)
+
+# ---------------------------
+# Calculate Balanced Accuracy
+
+# Extract True Positives (TP), True Negatives (TN), False Positives (FP), and False Negatives (FN)
+tn <- conf_matrix[1, 1]
+tp <- conf_matrix[2, 2]
+fp <- conf_matrix[2, 1]
+fn <- conf_matrix[1, 2]
+
+# Compute Balanced Accuracy
+balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6))
+cat("Balanced Accuracy (Test):", round(balanced_acc, 4), "\n")
+
+# ---------------------------
+# Shutdown H2O (optional)
+h2o.shutdown(prompt = FALSE)
+
+```
+
+
+----------- RANDOM FOREST ---------
+
+```{r}
+# Convert training data to H2O frame
+set.seed(123)
+h2o.init(max_mem_size = "6G")
+train_h2o <- as.h2o(training_data)
+
+train_h2o[, "label"] <- as.factor(train_h2o[, "label"])
+
+x <- colnames(training_data)[-which(names(training_data) == "label")]  # All columns except the target
+y <- colnames(training_data[1])
+
+# Train the H2O Random Forest Model
+rf_model <- h2o.randomForest(
+  x = x,                          # Predictors (column names)
+  y = y,                          # Target (name of the target column)
+  training_frame = train_h2o,     # Training data
+  ntrees = 100,                   # Number of trees
+  max_depth = 15,                 # Maximum tree depth
+  mtries = 1000,                  # Features considered per split
+  min_rows = 20,                  # Minimum rows per leaf
+  sample_rate = 0.8               # Row sampling rate
+)
+
+# Retrieve variable importance
+importance <- h2o.varimp(rf_model)
+# Plot variable importance
+h2o.varimp_plot(rf_model, num_of_features =75)
+head(importance[order(importance$relative_importance, decreasing = TRUE), ], 75)
+
+print(importance)
+
+cumulative_importance <- 0
+selected_features <- c()
+for (i in 1:nrow(importance)) {
+  cumulative_importance <- cumulative_importance + importance$percentage[i]
+  selected_features <- c(selected_features, importance$variable[i])
+  if (cumulative_importance >= 0.95) break
+}
+print(selected_features)
+
+length(selected_features)
+```
+
+```{r}
+rf_model_selected <- h2o.randomForest(
+  x = selected_features,
+  y = y,
+  training_frame = train_h2o,
+  ntrees = 100,
+  max_depth = 15,
+  mtries = length(selected_features),
+  min_rows = 20,
+  sample_rate = 0.8
+)
+```
+
+
+```{r}
+library(PRROC)
+
+val_h2o <- as.h2o(validation_data[,-1])
+predictions_rf <- (h2o.predict(rf_model_selected, val_h2o))
+predictions_rf <- as.data.frame(predictions_rf)
+predictions_rf <- as.numeric(predictions_rf$p1)  
+
+# Initialize data frames to store results
+threshold_results_rf <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric())
+
+# Define a sequence of threshold values
+threshold_values <- seq(0, 1, by = 0.001)
+
+# Helper function to calculate balanced accuracy for a given set of predictions and thresholds
+calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, model_name) {
+  results <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric(), Model = character())
+  
+  for (threshold in thresholds) {
+    # Convert probabilities to binary predictions
+    predicted_classes <- ifelse(predictions > threshold, 1, 0)
+    
+    # Create confusion matrix
+    conf_matrix <- table(Predicted = predicted_classes, Actual = y_actual)
+    
+    # Extract TP, TN, FP, FN (handle missing categories with tryCatch)
+    tn <- tryCatch(conf_matrix[1, 1], error = function(e) 0)
+    tp <- tryCatch(conf_matrix[2, 2], error = function(e) 0)
+    fp <- tryCatch(conf_matrix[2, 1], error = function(e) 0)
+    fn <- tryCatch(conf_matrix[1, 2], error = function(e) 0)
+    
+    # Calculate balanced accuracy
+    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) # Add small value to avoid division by zero
+    
+    # Append results
+    results <- rbind(results, data.frame(Threshold = threshold, BalancedAccuracy = balanced_acc, Model = model_name))
+  }
+  return(results)
+}
+
+length(val_h2o)
+# Calculate balanced accuracy for Lasso and Elastic Net
+threshold_results_rf<- calculate_balanced_accuracy_1(predictions_rf, y_val, threshold_values, "Random Forest")
+
+# Combine results for plotting
+threshold_results <- rbind(threshold_results_rf, threshold_results_EN, threshold_results_L)
+
+
+# Plot Balanced Accuracy vs Threshold
+
+ggplot(threshold_results, aes(x = Threshold, y = BalancedAccuracy, color= Model)) +
+  geom_line(size = 1) +
+  labs(
+    title = "Balanced Accuracy vs Threshold",
+    x = "Threshold",
+    y = "Balanced Accuracy"
+  ) +
+  theme_minimal()
+
+# Find and print maximum balanced accuracy for each model
+max_balanced_accuracy_L <- threshold_results_L[which.max(threshold_results_L$BalancedAccuracy), ]
+max_balanced_accuracy_EN <- threshold_results_EN[which.max(threshold_results_EN$BalancedAccuracy), ]
+
+cat("Maximum Balanced Accuracy (Random Forest):\n")
+cat("Threshold:", max_balanced_accuracy_L$Threshold, "\n")
+cat("Balanced Accuracy:", max_balanced_accuracy_L$BalancedAccuracy, "\n")
+
+
+
+```
+
+
+```{r}
+# Make predictions on the test data to mesure performance
+test_h2o <- as.h2o(testing_data[,-1])
+predictions_rf <- (h2o.predict(rf_model_selected, test_h2o))
+predictions_rf <- as.data.frame(predictions_rf)
+predictions_rf <- as.numeric(predictions_rf$p1)  
+
+```
+
+
+```{r}
+predicted_classes_RF <- ifelse(predictions_rf > 0.034, 1, 0) #Using optimal threshold
+```
+
+```{r}
+conf_matrix_RF <- table(Predicted =  predicted_classes_RF , Actual = y_true)
+print("Confusion Matrix Random Forest:")
+print(conf_matrix_RF)
+```
+
+```{r}
+cat("The Balanced Accuracy of Lasso on the test set is:", balanced_accuracy_L, "\n")
+cat("The Balanced Accuracy of Elastic Net on the test set is:", balanced_accuracy_EN, "\n")
+balanced_accuracy_RF <- calculate_balanced_accuracy(conf_matrix_RF)
+cat("The Balanced Accuracy of Random Forest on the test set is:", balanced_accuracy_RF, "\n")
+```
+
+
+
+
+
