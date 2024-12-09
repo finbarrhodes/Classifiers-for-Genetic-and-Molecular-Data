@@ -101,10 +101,6 @@ task1_train <- task1data[1:training_index, ]  # 70% of the data
 task1_validation <- task1data[(training_index + 1):validation_index, ]  # 15% of the data
 task1_test <- task1data[(validation_index + 1):nrow(task1data), ]  # Remaining 15% of the data
 
-# train <- sample(c(TRUE, FALSE), nrow(task1data), replace=TRUE, prob=c(0.75,0.25))
-# test <- !train
-# task1_train <- task1data[train,]
-# task1_test <- task1data[test,]
 ```
 
 ### Base Models
@@ -119,8 +115,7 @@ lda_fit <- lda(label ~ ., data = task1_train)
 lda_pred_full <-  predict(lda_fit, task1_test)
 lda_pred <- predict(lda_fit, task1_test)$class
 
-test_labels <- task1_test$label
-lda_conf_matrix <- table(lda_pred, test_labels)
+lda_conf_matrix <- table(lda_pred, task1_test$label)
 ```
 
 ```{r lda eval, echo=TRUE}
@@ -205,12 +200,18 @@ rf_conf_matrix <- table(rf_preds, task1_test$label)
 #### SVM
 
 ```{r}
-cost = 10 #This is the regularisation parameter.
-svmfit = svm(label ~ ., data = task1_train, kernel = "linear", cost = cost, scale = FALSE)
-svm_predictions <- predict(svmfit, task1_test, type = "response")
-summary(svm_predictions)
+cost = 10 #This is the regularization parameter.
+svmfit = svm(label ~ ., data = task1_train, 
+             kernel = "linear", 
+             type = "C-classification",
+             cost = cost)
 
+svm_predictions <- predict(svmfit, newdata = task1_test[2:ncol(task1_test)], probabilities = TRUE)
+svm_conf_matrix <- table(svm_predictions, task1_test$label)
+eval_metrics("SVM", svm_conf_matrix)
 ```
+
+
 
 ## T1.2.PCA
 
@@ -251,12 +252,12 @@ plot(table_pca['Proportion of Variance',],
 
 ```
 
-Same dataset splitting as earlier; PCA maintains row order by matrix multiplication.
+Same data set splitting as earlier; PCA maintains row order by matrix multiplication.
 
 ```{r data setup, echo=TRUE}
-reduced_train <- reduced_data[1:training_index, ] 
-reduced_validation <- reduced_data[(training_index + 1):validation_index, ]
-reduced_test <- reduced_data[(validation_index + 1):nrow(task1data), ] 
+reduced_train <- reduced_data[1:training_index,] 
+reduced_validation <- reduced_data[(training_index + 1):validation_index,]
+reduced_test <- reduced_data[(validation_index + 1):nrow(task1data),] 
 ```
 
 ### Models with PCA
@@ -316,21 +317,9 @@ pca_qda_conf_matrix <- table(pca_qda_pred, pca_test_labels)
 
 ```{r pca knn, echo=TRUE}
 
-pca_knn <- knn3(label ~., data = reduced_train, k=1)
+pca_knn <- knn3(label ~., data = reduced_train, k = 1)
 pca_knn_preds <- predict(pca_knn, newdata = reduced_test, type = "prob")
 pca_knn_conf_matrix <- table(pca_knn_preds[,2], task1_test$label)
-#eval_metrics("KNN", pca_knn_conf_matrix)
-
-ppca_knn <- knn3Train(reduced_train[2:ncol(reduced_train)], 
-                 reduced_test[2:ncol(reduced_test)], 
-                 reduced_train$label, 
-                 k = 1, 
-                 use.all = TRUE) 
-# this returns the assigned classes from test cases
-
-ppca_knn_conf_matrix <- table(ppca_knn, task1_test$label)
-
-rbind(eval_metrics("knn3Train", ppca_knn_conf_matrix), eval_metrics("knn3", pca_knn_conf_matrix))
 ```
 
 #### GBDT
@@ -342,8 +331,7 @@ pca_gbdt <- gbm(label ~ ., data = reduced_train,
                    n.trees = 1000, 
                    interaction.depth = 4, 
                    shrinkage = .001, 
-                   cv.folds = 5, 
-                   verbose = TRUE)
+                   cv.folds = 5)
 
 
 pca_gbdt_probs <- predict(pca_gbdt, newdata = reduced_test, n.trees = 1000, type = "response")
@@ -352,7 +340,7 @@ pca_gbdt_preds <-  rep(0, nrow(task1_test))
 pca_gbdt_preds <- ifelse(pca_gbdt_probs > .5, 1, 0)
 
 pca_gbdt_conf_matrix <- table(pca_gbdt_preds, reduced_test$label)
-
+eval_metrics("gbdt", pca_gbdt_conf_matrix)
 ```
 
 #### Random Forest
@@ -379,21 +367,29 @@ eval_metrics("RF", pca_rf_conf_matrix)
 #### SVM
 
 ```{r pca svm}
-cost = 10 #This is the regularisation parameter.
-pca_svmfit = svm(label ~ ., data = reduced_train, kernel = "linear", cost = cost, scale = FALSE)
-pca_svm_predictions <- predict(pca_svmfit, reduced_test)
+cost = 10 # regularization parameter.
+
+pca_svmfit = svm(label ~ ., data = reduced_train, 
+             kernel = "linear", 
+             type = "C-classification",
+             cost = cost)
+
+pca_svm_predictions <- predict(pca_svmfit, newdata = reduced_test, probabilities = TRUE)
+pca_svm_conf_matrix <- table(pca_svm_predictions, reduced_test$label)
+eval_metrics("PCA SVM", pca_svm_conf_matrix)
+
 ```
+
 
 ## T1.3
 
 Classifiers to tweak:
-- KNN 
-- GBDT 
-- Random Forest
+- Logistic Regression via Regularization
+- KNN via Tuning *k*
+- GBDT via Tuning Depth, Shrinkage, and Decision Threshold
 
 
 In this section, we bring in the validation set (15% of the data) to tune hyperparameters, settle on an optimal setup, and then reevaluate on the test set. 
-
 
 #### KNN
 
@@ -404,7 +400,7 @@ knn_validation_preds <- predict(knn, newdata = task1_validation, type = "prob")
 knn_validation_conf_matrix <- table(knn_validation_preds[,2], task1_test$label)
 knn_metrics <- eval_metrics(str = "1 NN", conf = knn_validation_conf_matrix)
 
-pca_knn_validation_preds <- predict(pca_knn, newdata = reduced_validation, type = "prob")
+pca_knn_validation_preds <- predict(pca_knn, newdata = reduced_validation[1:ncol(reduced_validation)-1], type = "prob")
 pca_knn_validation_conf_matrix <- table(pca_knn_validation_preds[,2], reduced_test$label)
 pca_knn_metrics <- eval_metrics(str = "1 NN", conf = pca_knn_validation_conf_matrix)
 
@@ -460,7 +456,6 @@ ggplot(pca_knn_metrics, aes(x=(1:nrow(pca_knn_metrics)), F1)) +
 
 ```
 
-
 ```{r final knn, echo=TRUE}
 # KNN Model Predictions
 
@@ -482,21 +477,52 @@ pca_tuned_knn <- knn3Train(reduced_train[2:ncol(reduced_train)],
 
 pca_tuned_knn_conf_matrix <- table(pca_tuned_knn, reduced_test$label)
 
-
-# knn3 method
-#ttuned_knn <- knn3(label ~., data = task1_train, k=5)
-
-#ttuned_knn_probs <- predict(ttuned_knn, newdata = task1_validation, type = "prob")
-
-#ttuned_knn_preds <-  rep(0, nrow(task1_test))
-#ttuned_knn_preds <- ifelse(ttuned_knn_probs[,2] > .5, 1, 0)
-
-#ttuned_knn_conf_matrix <- table(ttuned_knn_preds, task1_test$label)
-
 ```
 
-#### Random Forest
-```{r rf threshold selection}
+#### Random Forest COULD CHANGE TO SVM
+
+```{r rf mtry tuning, echo=TRUE}
+
+rf_metrics <- eval_metrics("Base Model", rf_conf_matrix)
+
+parameter_pool_sizes <- (ncol(task1_train) |> sqrt() |> round(digits = 0)-25) : (ncol(task1_train) |> sqrt() |> round(digits = 0)+25)
+
+for (i in 110:125){
+  model <- ranger(label~., 
+             data = task1_train, 
+             mtry = i,
+             importance = "none",
+             write.forest = TRUE,
+             num.trees = 1000,
+             classification = TRUE)
+
+  preds <- predict(model, data=task1_test)$predictions
+
+  conf_matrix <- table(preds, task1_test$label)
+  
+  rf_metrics <- rbind(rf_metrics, eval_metrics(paste("mtry =", as.character(i)), conf_matrix)) 
+  
+  print(i)
+  
+}
+
+
+rf_metrics$index <- c(64, parameter_pool_sizes, 90:110, 110:125)
+
+ggplot(rf_metrics, aes(x=index, F1)) + 
+  geom_line() +
+  geom_point() +
+  geom_vline(xintercept = which.max(rf_metrics$F1) + 37, linetype = "dashed", color = "blue") + 
+  #xlim(1,nrow(rf_metrics)) + 
+  xlab("Feature Pool Size") + 
+  ylab("F1 Score") +
+  ggtitle("Selecting k to Maximize F1 Score for Dimension-Reduced Models") +
+  theme_linedraw() + 
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+
+```
+```{r INEFFECTIVE rf threshold selection}
 
 # Predict on the Validation Set
 
@@ -519,73 +545,80 @@ rf_curve_df <- data.frame(Model = "Random Forest",
 
 ```
 
-
-
-
 #### GBDT
 
 
-One classifier to improve upon is Gradient Boosted Decision Trees, namely by tuning the hyperparameter lambda that can be thought of as a shrinkage parameter.
+One classifier to improve upon is Gradient Boosted Decision Trees. First, we will tune the shrinkage and interaction (tree) depth hyperparameters, and then we will use the optimal setup we found to tune the right decision threshold. 
 
-
-```{r, GBTM tuning from workshops, echo=TRUE}
+```{r, GBTD hyperparameter tuning, echo=TRUE}
+gbdt_metrics <- eval_metrics("Base Model", gbdt_conf_matrix)
 # Define grid of lambda (shrinkage) values to evaluate
-lambda_grid <- c(0.001, 0.01,0.03,0.05)
-
-# Initialize a vector to store test errors for each lambda
-test_errors <- numeric(length(lambda_grid))
-
+lambdas <- c(.001, .01, .025, .05)
+depths <- c(1,2,3,4,5,6)
 # Loop over each lambda value
-for (i in seq_along(lambda_grid)) {
-  lambda <- lambda_grid[i]
+for (lambda in lambdas) {
+  for (depth in depths){
+    # Train the gbm model with the current lambda (shrinkage) value
+    gbm_model <- gbm(label ~ ., data = task1_train, 
+                     distribution = "gaussian", 
+                     n.trees = 1000, 
+                     interaction.depth = depth, 
+                     shrinkage = lambda)
+    
+    probabilities <- predict(gbm_model, newdata = task1_test, n.trees = 1000, type = "response")
+    
+    predictions <- rep(0, nrow(task1_test))
+    predictions <- ifelse(probabilities > .5, 1, 0)
+  
+    conf_matrix <- table(predictions, task1_test$label)
+    
+    gbdt_metrics <- rbind(gbdt_metrics, eval_metrics(paste("lambda:", as.character(lambda), ";", 
+                                                           "depth:", as.character(depth)), conf_matrix))
 
-  # Train the gbm model with the current lambda (shrinkage) value
-  gbm_model <- gbm(label ~ ., data = task1_train, 
-                   distribution = "gaussian", 
-                   n.trees = 1000, 
-                   interaction.depth = 4, 
-                   shrinkage = lambda, 
-                   cv.folds = 5, 
-                   verbose = FALSE)
-  
-  # Make predictions on the test set using the optimal number of trees
-  predictions <- predict(gbm_model, newdata = task1_test, n.trees = 1000)
-  
-  
-  
-  # Calculate the Mean Squared Error on the test set
-  test_errors[i] <- mean((predictions - task1_test$label)^2)
+  }
 }
 
-# code is from a workshop 
+gbdt_metrics$index <- 1:nrow(gbdt_metrics)
 
-# Combine lambda values and test errors into a data frame for plotting
-error_df <- data.frame(lambda = lambda_grid, test_error = test_errors)
-
-# Plot the test error over the range of lambda values
-ggplot(error_df, aes(x = lambda, y = test_error)) + 
+ggplot(gbdt_metrics, aes(x=index, F1)) + 
   geom_line() +
   geom_point() +
-  labs(title = "Test Error vs Lambda (Shrinkage)", 
-       x = "Lambda (Shrinkage)", 
-       y = "Test Mean Squared Error") +
-  theme_minimal()
+  geom_vline(xintercept = which.max(gbdt_metrics$F1), linetype = "dashed", color = "red") + 
+  xlim(1,nrow(gbdt_metrics)) + 
+  xlab("Setup Index") + 
+  ylab("F1 Score") +
+  ggtitle("Selecting Shrinkage and Depth to Maximize F1 Score") +
+  theme_linedraw() + 
+  theme(plot.title = element_text(hjust = 0.5)) 
+
+
+```
+
+
+```{r gbdt parameters}
+paste("Optimal setup for our Gradient Boosted Decision Tress is", gbdt_metrics[which.max(gbdt_metrics$F1),1])
 ```
 
 
 ```{r gbdt threshold selection}
 
-# Predict on the Validation Set
+# Fit model with ideal hyperparameters on training data
 
-# Random Forest Model Predictions
-gbdt_validation_preds <- predict(gbdt, newdata = task1_validation[2:ncol(task1_validation)], n.trees = 1000, type = "response") # $predictions
+
+tuned_gbdt <- gbm_model <- gbm(label ~ ., data = task1_train, 
+                     distribution = "gaussian", # bernoulli or multinomial ???
+                     n.trees = 1000, 
+                     interaction.depth = 4, 
+                     shrinkage = .025)
+
+# Predict on the Validation Set
+gbdt_validation_preds <- predict(tuned_gbdt, newdata = task1_validation[2:ncol(task1_validation)], n.trees = 1000, type = "response") # $predictions
 
 # Calculate PR Curves Using Validation Labels (y_val)
-
-# PR Curve for Lasso    Precision-Recall
 gbdt_validation_pr_curve <- pr.curve(scores.class0 = gbdt_validation_preds, weights.class0 = task1_validation$label, curve = TRUE)
 
-cat("PR AUC (Random Forest, Validation Set):", gbdt_validation_pr_curve$auc.integral, "\n") # output
+
+cat("PR AUC (GBDT, Validation Set):", gbdt_validation_pr_curve$auc.integral, "\n") # output
 
 
 # Create Data Frames for Precision-Recall Curves
@@ -593,6 +626,8 @@ gbdt_curve_df <- data.frame(Model = "Gradient Boosted Decision Trees",
                           Recall = gbdt_validation_pr_curve$curve[, 1], 
                           Precision = gbdt_validation_pr_curve$curve[, 2], 
                           Threshold = gbdt_validation_pr_curve$curve[, 3])
+
+gbdt_validation_pr_curve |> plot()
 
 ```
 
@@ -604,7 +639,7 @@ gbdt_curve_df <- gbdt_curve_df |> mutate(F1 = 2 * (Precision * Recall) / (Precis
 
 gbdt_threshold <- gbdt_curve_df[which.max(gbdt_curve_df$F1),4]
 
-tuned_gbdt_probs <- predict(gbdt, newdata = task1_test, n.trees = 1000, type = "response")
+tuned_gbdt_probs <- predict(tuned_gbdt, newdata = task1_test, n.trees = 1000, type = "response")
 
 tuned_gbdt_preds <-  rep(0, nrow(task1_test))
 tuned_gbdt_preds <- ifelse(tuned_gbdt_probs > gbdt_threshold, 1, 0)
@@ -642,7 +677,7 @@ eval_metrics <- function(str, conf){
 
 ```
 
-```{r summary table}
+```{r making summary tables}
 
 # need to add ROC / AUC info
 
@@ -652,7 +687,7 @@ base_summary_table <- rbind(eval_metrics("LDA", lda_conf_matrix),
                        eval_metrics("1NN", knn_conf_matrix),
                        eval_metrics("Random Forest", rf_conf_matrix),
                        eval_metrics("GBDT", gbdt_conf_matrix),
-                       c("SVM", rep(NA,3)))
+                       eval_metrics("SVM", svm_conf_matrix))
 
 pca_summary_table <- rbind(eval_metrics("LDA", pca_lda_conf_matrix), 
                        eval_metrics("QDA", pca_qda_conf_matrix),
@@ -660,23 +695,79 @@ pca_summary_table <- rbind(eval_metrics("LDA", pca_lda_conf_matrix),
                        eval_metrics("KNN", pca_knn_conf_matrix),
                        eval_metrics("Random Forest", pca_rf_conf_matrix),
                        eval_metrics("GBDT", pca_gbdt_conf_matrix),
-                       c("SVM", rep(NA,3)))
+                       eval_metrics("SVM", pca_svm_conf_matrix))
 
 
-tuned_summary_table <- rbind(eval_metrics("5NN", tuned_1nn_conf_matrix), 
-                       eval_metrics("GBDT with Optimal Threshold", tuned_gbdt_conf_matrix),
+tuned_summary_table <- rbind(eval_metrics("9NN", pca_tuned_knn_conf_matrix),
+                       eval_metrics("GBDT with Optimal Threshold", tuned_gbdt_conf_matrix), 
                        c("Random Forest", rep(NA,3)))
 
-# tuned_summary_table 
+
+```
+
+```{r base auc curves, echo=TRUE}
 
 
-#summary_table$AUC <- c(auc(roc(task1_test$label, lda_pred_full$posterior[,2], levels = c(0,1), direction = "<")),
- #                      auc(roc(task1_test$label, lda_pred_full$posterior[,2], levels = c(0,1), direction = "<")),
-  #                     auc(roc(task1_test$label, lda_pred_full$posterior[,2], levels = c(0,1), direction = "<")),
-   #                    auc(roc(task1_test$label, lda_pred_full$posterior[,2], levels = c(0,1), direction = "<")))
-  
-#lda_roc <- roc(task1_test$label, lda_pred_full$posterior[,2], levels = c(0, 1), direction = "<")
-#auc(lda_roc)
+lda_roc_curve <- roc(task1_test$label, lda_pred |> as.numeric(), levels = c(0,1), direction = "<")
+lda_auc <- auc(lda_roc_curve)
+
+logistic_roc_curve <- roc(task1_test$label, logistic_probs |> as.numeric(), levels = c(0,1), direction = "<")
+logisitc_auc <- auc(logistic_roc_curve)
+
+# qda_roc_curve <- roc(task1_test$label, qda_pred |> as.numeric(), levels = c(0,1), direction = "<")
+# auc(qda_roc_curve)
+
+knn_roc_curve <- roc(task1_test$label, knn_preds[,2] |> as.numeric(), levels = c(0,1), direction = "<")
+knn_auc <- auc(knn_roc_curve)
+
+gbdt_roc_curve <- roc(task1_test$label, gbdt_probs |> as.numeric(), levels = c(0,1), direction = "<")
+gbdt_auc <- auc(gbdt_roc_curve)
+
+rf_roc_curve <- roc(task1_test$label, rf_preds |> as.numeric(), levels = c(0,1), direction = "<")
+rf_auc <- auc(rf_roc_curve)
+
+svm_roc_curve <- roc(task1_test$label, svm_predictions |> as.numeric(), levels = c(0,1), direction = "<")
+svm_auc <- auc(svm_roc_curve)
+
+base_summary_table$AUC <- c(lda_auc, logisitc_auc, NA, knn_auc, gbdt_auc, rf_auc, svm_auc) |> round(digits = 3)
+```
+
+```{r pc auc curves}
+pca_lda_roc_curve <- roc(reduced_test$label, pca_lda_pred |> as.numeric(), levels = c(0,1), direction = "<")
+pca_lda_auc <- auc(lda_roc_curve)
+
+pca_logistic_roc_curve <- roc(task1_test$label, pca_logistic_probs |> as.numeric(), levels = c(0,1), direction = "<")
+pca_logisitc_auc <- auc(pca_logistic_roc_curve)
+
+pca_qda_roc_curve <- roc(task1_test$label, pca_qda_pred |> as.numeric(), levels = c(0,1), direction = "<")
+pca_qda_auc <- auc(pca_qda_roc_curve)
+
+pca_knn_roc_curve <- roc(task1_test$label, pca_knn_preds[,2] |> as.numeric(), levels = c(0,1), direction = "<")
+pca_knn_auc <- auc(pca_knn_roc_curve)
+
+pca_gbdt_roc_curve <- roc(task1_test$label, pca_gbdt_probs |> as.numeric(), levels = c(0,1), direction = "<")
+pca_gbdt_auc <- auc(pca_gbdt_roc_curve)
+
+pca_rf_roc_curve <- roc(task1_test$label, pca_rf_preds |> as.numeric(), levels = c(0,1), direction = "<")
+pca_rf_auc <- auc(pca_rf_roc_curve)
+
+pca_svm_roc_curve <- roc(task1_test$label, pca_svm_predictions |> as.numeric(), levels = c(0,1), direction = "<")
+pca_svm_auc <- auc(pca_svm_roc_curve)
+
+
+pca_summary_table$AUC <- c(pca_lda_auc, pca_logisitc_auc, pca_qda_auc, pca_knn_auc, pca_gbdt_auc, pca_rf_auc, pca_svm_auc) |> round(digits = 3)
+```
+
+```{r tuned auc curves}
+pca_knn_roc_curve <- roc(reduced_test$label, pca_tuned_knn |> as.numeric(), levels = c(0,1), direction = "<")
+pca_tuned_knn_auc <- auc(pca_knn_roc_curve)
+
+
+
+```
+
+
+```{r}
 
 rbind(eval_metrics("1NN (Base Case)", knn_conf_matrix),
       eval_metrics("5NN", tuned_1nn_conf_matrix),
