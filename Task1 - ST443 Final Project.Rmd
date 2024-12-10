@@ -67,6 +67,7 @@ summary(covariate_sparsities)
 ggplot(covariate_sparsities, aes(Sparsity)) + 
   geom_histogram(color = "black", fill = "white" ,bins = 40) + 
   ggtitle("Distribution of Sparsity Rates Across Covariates") + 
+  geom_vline(xintercept = mean(covariate_sparsities$Sparsity), color = "red", linetype = "dashed") +
   theme_bw()
 
 
@@ -568,15 +569,18 @@ for (lambda in lambdas) {
     
     gbdt_metrics <- rbind(gbdt_metrics, eval_metrics(paste("lambda:", as.character(lambda), ";", 
                                                            "depth:", as.character(depth)), conf_matrix))
-
+    print(depth)
+    print(lambda)
   }
 }
 
 gbdt_metrics$index <- 1:nrow(gbdt_metrics)
 
-ggplot(gbdt_metrics, aes(x=index, F1)) + 
+ggplot(gbdt_metrics[2:nrow(gbdt_metrics),], aes(x=index, F1)) + 
   geom_line() +
   geom_point() +
+  geom_hline(yintercept = gbdt_metrics$F1[1], linetype = "solid", color = "black") + 
+  annotate("text", x=1.75, y=gbdt_metrics$F1[1]+.0075, label = "Base Model") +
   geom_vline(xintercept = which.max(gbdt_metrics$F1), linetype = "dashed", color = "red") + 
   xlim(1,nrow(gbdt_metrics)) + 
   xlab("Setup Index") + 
@@ -602,8 +606,8 @@ paste("Optimal setup for our Gradient Boosted Decision Tress is", gbdt_metrics[w
 tuned_gbdt <- gbm_model <- gbm(label ~ ., data = task1_train, 
                      distribution = "bernoulli", # bernoulli or multinomial ???
                      n.trees = 1000, 
-                     interaction.depth = 4, 
-                     shrinkage = .025)
+                     interaction.depth = 5, 
+                     shrinkage = .05)
 
 # Predict on the Validation Set
 gbdt_validation_preds <- predict(tuned_gbdt, newdata = task1_validation[2:ncol(task1_validation)], n.trees = 1000, type = "response") # $predictions
@@ -648,9 +652,9 @@ tuned_gbdt_conf_matrix <- table(tuned_gbdt_preds, task1_test$label)
 
 ```{r pca svm cost tuning}
 
-pca_svm_validation_preds <- predict(pca_svmfit, newdata = reduced_validation, probabilities = TRUE)
+pca_svm_validation_preds <- predict(pca_svmfit, newdata = reduced_validation[1:ncol(reduced_validation)-1], probabilities = TRUE)
 pca_svm_validation_conf_matrix <- table(pca_svm_validation_preds, reduced_validation$label)
-pca_svm_metrics <- eval_metrics(str = "Cost = 10 (Base + PCA)", conf = pca_svm_validation_conf_matrix)
+pca_svm_metrics <- eval_metrics("Cost = 10 (Base + PCA)", pca_svm_validation_conf_matrix)
 
 # set costs list to iterate through
 costs <- c(.1, .25, .5, 1, 2.5, 5, 20)
@@ -672,7 +676,17 @@ pca_svm_metrics
 
 ```
 
+```{r SVM FINAL, echo=TRUE}
 
+tuned_svm <- svm(label ~ ., data = reduced_train, 
+             kernel = "linear", 
+             type = "C-classification",
+             cost = 5)
+
+tuned_svm_preds <- predict(tuned_svm, newdata = reduced_test[1:ncol(reduced_test)-1], probabilities = TRUE)
+tuned_svm_conf_matrix <- table(tuned_svm_preds, reduced_test$label)
+
+```
 
 ## Model Evaluation
 
@@ -724,7 +738,7 @@ pca_summary_table <- rbind(eval_metrics("LDA", pca_lda_conf_matrix),
 
 tuned_summary_table <- rbind(eval_metrics("9NN", pca_tuned_knn_conf_matrix),
                        eval_metrics("GBDT with Optimal Threshold", tuned_gbdt_conf_matrix), 
-                       c("SVM", rep(NA,3)))
+                       eval_metrics("SVM with Optimal Cost", tuned_svm_conf_matrix))
 
 
 ```
@@ -786,18 +800,21 @@ pca_summary_table$AUC <- c(pca_lda_auc, pca_logisitc_auc, pca_qda_auc, pca_knn_a
 pca_knn_roc_curve <- roc(reduced_test$label, pca_tuned_knn |> as.numeric(), levels = c(0,1), direction = "<")
 pca_tuned_knn_auc <- auc(pca_knn_roc_curve)
 
+tuned_gbdt_roc_curve <- roc(reduced_test$label, tuned_gbdt_preds |> as.numeric(), levels = c(0,1), direction = "<")
+tuned_gbdt_auc <- auc(tuned_gbdt_roc_curve)
 
+tuned_svm_roc_curve <- roc(reduced_test$label, tuned_svm_preds |> as.numeric(), levels = c(0,1), direction = "<")
+tuned_svm_auc <- auc(tuned_svm_roc_curve)
+
+tuned_summary_table$AUC <- c(pca_tuned_knn_auc, tuned_gbdt_auc, tuned_svm_auc) |> round(digits = 3)
 
 ```
 
 
 ```{r}
+base_summary_table
 
-rbind(eval_metrics("1NN (Base Case)", knn_conf_matrix),
-      eval_metrics("5NN", tuned_1nn_conf_matrix),
-      eval_metrics("PCA 1NN", pca_knn_conf_matrix),
-      eval_metrics("PCA 9NN", pca_tuned_knn_conf_matrix))
+pca_summary_table
 
-rbind(eval_metrics("Base SVM", svm_conf_matrix),
-      eval_metrics("PCA SVM", pca_svm_conf_matrix))
+tuned_summary_table
 ```
