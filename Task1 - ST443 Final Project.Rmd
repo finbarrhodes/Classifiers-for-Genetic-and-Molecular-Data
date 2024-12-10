@@ -116,6 +116,7 @@ lda_pred_full <-  predict(lda_fit, task1_test)
 lda_pred <- predict(lda_fit, task1_test)$class
 
 lda_conf_matrix <- table(lda_pred, task1_test$label)
+eval_metrics("lda", lda_conf_matrix)
 ```
 
 ```{r lda eval, echo=TRUE}
@@ -164,7 +165,7 @@ eval_metrics("KNN", knn_conf_matrix)
 ```{r GBDT}
 
 gbdt <- gbm(label ~ ., data = task1_train, 
-                   distribution = "gaussian", 
+                   distribution = "bernoulli", 
                    n.trees = 1000, 
                    interaction.depth = 4, 
                    shrinkage = .001)
@@ -200,15 +201,13 @@ rf_conf_matrix <- table(rf_preds, task1_test$label)
 #### SVM
 
 ```{r}
-cost = 10 #This is the regularization parameter.
 svmfit = svm(label ~ ., data = task1_train, 
              kernel = "linear", 
              type = "C-classification",
-             cost = cost)
+             cost = 10)
 
 svm_predictions <- predict(svmfit, newdata = task1_test[2:ncol(task1_test)], probabilities = TRUE)
 svm_conf_matrix <- table(svm_predictions, task1_test$label)
-eval_metrics("SVM", svm_conf_matrix)
 ```
 
 
@@ -327,7 +326,7 @@ pca_knn_conf_matrix <- table(pca_knn_preds[,2], task1_test$label)
 ```{r pca GBDT}
 
 pca_gbdt <- gbm(label ~ ., data = reduced_train, 
-                   distribution = "gaussian", 
+                   distribution = "bernoulli", 
                    n.trees = 1000, 
                    interaction.depth = 4, 
                    shrinkage = .001, 
@@ -340,7 +339,6 @@ pca_gbdt_preds <-  rep(0, nrow(task1_test))
 pca_gbdt_preds <- ifelse(pca_gbdt_probs > .5, 1, 0)
 
 pca_gbdt_conf_matrix <- table(pca_gbdt_preds, reduced_test$label)
-eval_metrics("gbdt", pca_gbdt_conf_matrix)
 ```
 
 #### Random Forest
@@ -384,10 +382,9 @@ eval_metrics("PCA SVM", pca_svm_conf_matrix)
 ## T1.3
 
 Classifiers to tweak:
-- Logistic Regression via Regularization
 - KNN via Tuning *k*
 - GBDT via Tuning Depth, Shrinkage, and Decision Threshold
-
+- SVM via Tuning Cost (Margin) Parameter
 
 In this section, we bring in the validation set (15% of the data) to tune hyperparameters, settle on an optimal setup, and then reevaluate on the test set. 
 
@@ -428,9 +425,6 @@ for (k in 2:20){
   
   print(k)
 }
-
-knn_metrics
-pca_knn_metrics
 
 ggplot(knn_metrics, aes(x=(1:nrow(knn_metrics)), F1)) + 
   geom_line() +
@@ -560,7 +554,7 @@ for (lambda in lambdas) {
   for (depth in depths){
     # Train the gbm model with the current lambda (shrinkage) value
     gbm_model <- gbm(label ~ ., data = task1_train, 
-                     distribution = "gaussian", 
+                     distribution = "bernoulli", 
                      n.trees = 1000, 
                      interaction.depth = depth, 
                      shrinkage = lambda)
@@ -606,7 +600,7 @@ paste("Optimal setup for our Gradient Boosted Decision Tress is", gbdt_metrics[w
 
 
 tuned_gbdt <- gbm_model <- gbm(label ~ ., data = task1_train, 
-                     distribution = "gaussian", # bernoulli or multinomial ???
+                     distribution = "bernoulli", # bernoulli or multinomial ???
                      n.trees = 1000, 
                      interaction.depth = 4, 
                      shrinkage = .025)
@@ -645,6 +639,36 @@ tuned_gbdt_preds <-  rep(0, nrow(task1_test))
 tuned_gbdt_preds <- ifelse(tuned_gbdt_probs > gbdt_threshold, 1, 0)
 
 tuned_gbdt_conf_matrix <- table(tuned_gbdt_preds, task1_test$label)
+
+```
+
+
+
+#### SVM
+
+```{r pca svm cost tuning}
+
+pca_svm_validation_preds <- predict(pca_svmfit, newdata = reduced_validation, probabilities = TRUE)
+pca_svm_validation_conf_matrix <- table(pca_svm_validation_preds, reduced_validation$label)
+pca_svm_metrics <- eval_metrics(str = "Cost = 10 (Base + PCA)", conf = pca_svm_validation_conf_matrix)
+
+# set costs list to iterate through
+costs <- c(.1, .25, .5, 1, 2.5, 5, 20)
+
+# within loop, fit on training, predict and evaluate on validation
+for (i in costs){
+  
+  pca_model <- svm(label ~ ., data = reduced_train, 
+             kernel = "linear", 
+             type = "C-classification",
+             cost = i)
+  
+  pca_predictions <- predict(pca_model, newdata = reduced_validation[1:ncol(reduced_validation)-1], probabilities = TRUE)
+  pca_conf_matrix <- table(pca_predictions, reduced_validation$label)
+  pca_svm_metrics <- rbind(pca_svm_metrics, eval_metrics(paste("Cost =", as.character(i)), pca_conf_matrix))
+
+}
+pca_svm_metrics
 
 ```
 
@@ -700,7 +724,7 @@ pca_summary_table <- rbind(eval_metrics("LDA", pca_lda_conf_matrix),
 
 tuned_summary_table <- rbind(eval_metrics("9NN", pca_tuned_knn_conf_matrix),
                        eval_metrics("GBDT with Optimal Threshold", tuned_gbdt_conf_matrix), 
-                       c("Random Forest", rep(NA,3)))
+                       c("SVM", rep(NA,3)))
 
 
 ```
@@ -774,6 +798,6 @@ rbind(eval_metrics("1NN (Base Case)", knn_conf_matrix),
       eval_metrics("PCA 1NN", pca_knn_conf_matrix),
       eval_metrics("PCA 9NN", pca_tuned_knn_conf_matrix))
 
-rbind(eval_metrics("Base RF", rf_conf_matrix),
-      eval_metrics("PCA RF", pca_rf_conf_matrix))
+rbind(eval_metrics("Base SVM", svm_conf_matrix),
+      eval_metrics("PCA SVM", pca_svm_conf_matrix))
 ```
