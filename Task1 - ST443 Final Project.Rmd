@@ -14,26 +14,18 @@ library(MASS)
 library(class)
 library(pROC)
 library(caret) 
-#library(adabag) # For the AdaBoost algorithm
-library(mboost)   # For gamboost
-library (gbm) # Gradient Boosting Machines
-library(xgboost) #Extreme Gradient Boosting
+library(mboost)   
+library(gbm)
+library(xgboost)
 library(ranger)
 library(e1071)
 library(lattice)
 library(PRROC)
-
 ```
 
 ```{r reading in data, echo=TRUE}
-task1data <- read.csv("/Users/finbarrhodes/Documents/ST443/Final Project/data1.csv.gz")
+task1data <- read.csv("data1.csv.gz")
 task1data$label <- if_else(task1data$label == "TREG", 1, 0)
-```
-
-Here we adjust the *label* column to a factor column, with *TREG* being 1 and *CD4+T* being 0
-
-```{r label-to-factor}
-table(task1data$label, useNA = "ifany")
 ```
 
 ## T1.1
@@ -42,13 +34,13 @@ table(task1data$label, useNA = "ifany")
 
 nas <- task1data |> is.na() |> colSums() |> table()
 if (nas[1] == ncol(task1data)){
-  print("We have that there are no missing data in any columns which will be hekpful in our analysis")
+  print("We have that there are no missing data in any columns which will be helpful in our analysis")
 }
 ```
 
 ```{r overall sparsity, echo=FALSE}
 total_zeros <- sum(rowSums(task1data == 0))
-total_entries <- 5471 * 4124
+total_entries <- nrow(task1data) * ncol(task1data)
 (total_zeros / total_entries) |> round(digits = 3)
 ```
 
@@ -70,19 +62,23 @@ ggplot(covariate_sparsities, aes(Sparsity)) +
   geom_vline(xintercept = mean(covariate_sparsities$Sparsity), color = "red", linetype = "dashed") +
   theme_bw()
 
-
 barplot(colMeans(task1data[2:ncol(task1data)]))
 
 ```
 
-can ask the question if all features are truly of use
 
 ```{r heatmap}
 
 task1matrix <- sapply(task1data, as.numeric) |> as.matrix()
 
 pal <- colorRampPalette(c("red", "yellow"), space = "rgb") 
-levelplot(task1matrix, main="Task 1 Data Heatmap", xlab=" ", ylab=" ", col.regions=pal(40), cuts=3, at=seq(0,1,0.5)) #, useRaster = TRUE)
+levelplot(task1matrix, 
+          main="Task 1 Data Heatmap",
+          xlab=" ", 
+          ylab=" ", 
+          col.regions=pal(40), 
+          cuts=3, 
+          at=seq(0,1,0.5))
 
 
 ```
@@ -333,7 +329,6 @@ pca_gbdt <- gbm(label ~ ., data = reduced_train,
                    shrinkage = .001, 
                    cv.folds = 5)
 
-
 pca_gbdt_probs <- predict(pca_gbdt, newdata = reduced_test, n.trees = 1000, type = "response")
 
 pca_gbdt_preds <-  rep(0, nrow(task1_test))
@@ -366,12 +361,10 @@ eval_metrics("RF", pca_rf_conf_matrix)
 #### SVM
 
 ```{r pca svm}
-cost = 10 # regularization parameter.
-
 pca_svmfit = svm(label ~ ., data = reduced_train, 
              kernel = "linear", 
              type = "C-classification",
-             cost = cost)
+             cost = 10)
 
 pca_svm_predictions <- predict(pca_svmfit, newdata = reduced_test, probabilities = TRUE)
 pca_svm_conf_matrix <- table(pca_svm_predictions, reduced_test$label)
@@ -602,9 +595,8 @@ paste("Optimal setup for our Gradient Boosted Decision Tress is", gbdt_metrics[w
 
 # Fit model with ideal hyperparameters on training data
 
-
-tuned_gbdt <- gbm_model <- gbm(label ~ ., data = task1_train, 
-                     distribution = "bernoulli", # bernoulli or multinomial ???
+tuned_gbdt <- gbm(label ~ ., data = task1_train, 
+                     distribution = "bernoulli", 
                      n.trees = 1000, 
                      interaction.depth = 5, 
                      shrinkage = .05)
@@ -767,12 +759,12 @@ rf_auc <- auc(rf_roc_curve)
 svm_roc_curve <- roc(task1_test$label, svm_predictions |> as.numeric(), levels = c(0,1), direction = "<")
 svm_auc <- auc(svm_roc_curve)
 
-base_summary_table$AUC <- c(lda_auc, logisitc_auc, NA, knn_auc, gbdt_auc, rf_auc, svm_auc) |> round(digits = 3)
+base_summary_table$AUC <- c(lda_auc, NA, logisitc_auc, knn_auc, rf_auc, gbdt_auc,  svm_auc) |> round(digits = 3)
 ```
 
 ```{r pc auc curves}
 pca_lda_roc_curve <- roc(reduced_test$label, pca_lda_pred |> as.numeric(), levels = c(0,1), direction = "<")
-pca_lda_auc <- auc(lda_roc_curve)
+pca_lda_auc <- auc(pca_lda_roc_curve)
 
 pca_logistic_roc_curve <- roc(task1_test$label, pca_logistic_probs |> as.numeric(), levels = c(0,1), direction = "<")
 pca_logisitc_auc <- auc(pca_logistic_roc_curve)
@@ -793,7 +785,7 @@ pca_svm_roc_curve <- roc(task1_test$label, pca_svm_predictions |> as.numeric(), 
 pca_svm_auc <- auc(pca_svm_roc_curve)
 
 
-pca_summary_table$AUC <- c(pca_lda_auc, pca_logisitc_auc, pca_qda_auc, pca_knn_auc, pca_gbdt_auc, pca_rf_auc, pca_svm_auc) |> round(digits = 3)
+pca_summary_table$AUC <- c(pca_lda_auc, pca_qda_auc, pca_logisitc_auc,  pca_knn_auc, pca_rf_auc, pca_gbdt_auc, pca_svm_auc) |> round(digits = 3)
 ```
 
 ```{r tuned auc curves}
@@ -818,3 +810,42 @@ pca_summary_table
 
 tuned_summary_table
 ```
+
+## T1.4
+
+### lse_gbdt()
+
+```{r function implementation}
+
+mypredict <- function(){
+  
+  ### function takes nothing as input
+  ###
+  ### returns predictions, one per row, in the same order as test.csv.gz
+  
+  # shuffling data 
+  data <- read.csv("/Users/finbarrhodes/Documents/ST443/Final Project/data1.csv.gz") # test.csv.gz
+  data$label <- if_else(data$label == "TREG", 1, 0)
+  
+  # predict on top model from T1.3
+  probabilities <- predict(tuned_gbdt, newdata = data[,-1], n.trees = 1000, type = "response")
+  predictions <- rep(0, nrow(data))
+  predictions <- ifelse(probabilities > gbdt_threshold, 1, 0) # threshold defined as 0.4698173
+  
+  write.table(predictions |> as.data.frame(), 
+                         file = "predictions.txt", 
+                         quote = FALSE, 
+                         row.names = FALSE, 
+                         col.names = FALSE)
+  
+}
+
+
+```
+
+
+
+
+
+
+
