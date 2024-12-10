@@ -28,6 +28,40 @@ task1data <- read.csv("data1.csv.gz")
 task1data$label <- if_else(task1data$label == "TREG", 1, 0)
 ```
 
+
+```{r eval_metrics function, echo=TRUE}
+
+eval_metrics <- function(str, conf){
+  
+  ### function takes as input a string (str) that describes the method, and a 
+  ### a confusion matrix to evaluate Accuracy, Balanced, Precision, Recall, 
+  ### and F1 score from. 
+  ###
+  ### Returns a row of a dataframe with the method and the key metrics.
+  
+  # setup
+  TN <- conf[[1]]
+  FN <- conf[[2]]
+  FP <- conf[[3]]
+  TP <- conf[[4]]
+  
+  # metrics
+  accuracy <- 1 - ((FN + FP) / sum(conf))
+  BA <- .5 * (TP / (TP + FN)) + .5 * (TN / (TN + FP))
+  precision <- TP / (TP + FP)
+  recall <- TP / (TP + FN)
+  F1 <- 2 * (precision * recall) / (precision + recall + 1e-6)
+  
+  # output
+  return(data.frame("Method" = str,
+                    "Accuracy" = accuracy |> round(digits = 3),
+                    "Balanced Accuracy" = BA |> round(digits = 3),
+                    "F1" = F1 |> round(digits = 3)))
+}
+
+```
+
+
 ## T1.1
 
 ```{r missing data, echo=TRUE}
@@ -85,7 +119,7 @@ levelplot(task1matrix,
 
 ## T1.2
 
-Below we will shuffle the rows in our dataset, then split them into *training*, *validation*, and *test* sets.
+Below we will shuffle the rows in our dataset, then split them into *training*, *validation*, and *test* sets. In the base and PCA model fits, we use *train* and *test*, and for the tuning portion (T1.3), we use the *validation* set.
 
 ```{r data setup, echo=TRUE}
 task1data <- task1data[sample(1:nrow(task1data)), ]
@@ -118,7 +152,6 @@ eval_metrics("lda", lda_conf_matrix)
 
 ```{r lda eval, echo=TRUE}
 lda_conf_matrix
-
 eval_metrics(str = "LDA", conf = lda_conf_matrix)
 
 ```
@@ -682,31 +715,6 @@ tuned_svm_conf_matrix <- table(tuned_svm_preds, reduced_test$label)
 
 ## Model Evaluation
 
-```{r eval_metrics function, echo=TRUE}
-
-eval_metrics <- function(str, conf){
-  # setup
-  TN <- conf[[1]]
-  FN <- conf[[2]]
-  FP <- conf[[3]]
-  TP <- conf[[4]]
-  
-  # metrics
-  accuracy <- 1 - ((FN + FP) / sum(conf))
-  BA <- .5 * (TP / (TP + FN)) + .5 * (TN / (TN + FP))
-  precision <- TP / (TP + FP)
-  recall <- TP / (TP + FN)
-  F1 <- 2 * (precision * recall) / (precision + recall + 1e-6)
-  
-  # output
-  return(data.frame("Method" = str,
-                    "Accuracy" = accuracy |> round(digits = 3),
-                    "Balanced Accuracy" = BA |> round(digits = 3),
-                    "F1" = F1 |> round(digits = 3)))
-}
-
-```
-
 ```{r making summary tables}
 
 # need to add ROC / AUC info
@@ -813,7 +821,7 @@ tuned_summary_table
 
 ## T1.4
 
-### lse_gbdt()
+### mypredict()
 
 ```{r function implementation}
 
