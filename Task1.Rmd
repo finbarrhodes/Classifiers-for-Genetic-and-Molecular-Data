@@ -154,9 +154,9 @@ lda_conf_matrix <- table(lda_pred, task1_test$label)
 ```{r logistic regression, echo=TRUE}
 logistic_fit <- glm(label ~ ., data = task1_train, family = binomial)
 logistic_probs <-  predict(logistic_fit, newdata = task1_test, type = "response")
-# ```
+```
 
-# ```{r logit eval}
+```{r logit eval}
 logistic_pred <-  rep(0, nrow(task1_test))
 logistic_pred[logistic_probs > .5] <-  1
 
@@ -171,7 +171,6 @@ In running this classifier, there is a problem inherent in our data: there are t
 
 ```{r qda, echo=TRUE}
 #qda_fit <- MASS::qda(label ~ ., data = task1_train, subset = train)
-
 ```
 
 #### KNN
