@@ -7,7 +7,8 @@ output: html_document
 
 ```{r libraries, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-set.seed(443)
+seed <- 443
+set.seed(seed)
 library(ggplot2)
 library(tidyverse)
 library(MASS)
@@ -27,7 +28,6 @@ library(PRROC)
 task1data <- read.csv("data1.csv.gz")
 task1data$label <- if_else(task1data$label == "TREG", 1, 0)
 ```
-
 
 ```{r eval_metrics function, echo=TRUE}
 
@@ -145,15 +145,7 @@ lda_fit <- lda(label ~ ., data = task1_train)
 ```{r lda predict}
 lda_pred_full <-  predict(lda_fit, task1_test)
 lda_pred <- predict(lda_fit, task1_test)$class
-
 lda_conf_matrix <- table(lda_pred, task1_test$label)
-eval_metrics("lda", lda_conf_matrix)
-```
-
-```{r lda eval, echo=TRUE}
-lda_conf_matrix
-eval_metrics(str = "LDA", conf = lda_conf_matrix)
-
 ```
 
 #### Logistic Regression
@@ -161,30 +153,29 @@ eval_metrics(str = "LDA", conf = lda_conf_matrix)
 ```{r logistic regression, echo=TRUE}
 logistic_fit <- glm(label ~ ., data = task1_train, family = binomial)
 logistic_probs <-  predict(logistic_fit, newdata = task1_test, type = "response")
-```
+# ```
 
-```{r logit eval}
+# ```{r logit eval}
 logistic_pred <-  rep(0, nrow(task1_test))
 logistic_pred[logistic_probs > .5] <-  1
 
 logistic_conf_matrix <- table(logistic_pred, task1_test$label)
 eval_metrics(str = "Logisitc Regression", conf = logistic_conf_matrix)
+
 ```
 
 #### QDA
 
-In running this classifier, there is a problem inherent in our data: there are too few observations in the two groups in the training set for qda() to run. In our training set, there are 2540 CD4+T's (0's) and 1624 TREG's (1's). In order for qda() to run properly, we can only have, at a maximum, 1624 covariates or columns in the dataset. At this juncture, we can consider dimenstion reduction methods.
+In running this classifier, there is a problem inherent in our data: there are too few observations in the two groups in the training set for qda() to run. In our training set, there are more columns/features/covariates than there are instances of either class (TREG & CD4+T). In order for qda() to run properly, we can only have, at a maximum, equal numbers of covariates and counts of either class. At this juncture, we can consider dimension reduction methods, as seen in T1.3. 
 
 ```{r qda, echo=TRUE}
-#dummy_data <- task1data[,1:1624]
-#qda_fit <- MASS::qda(label ~ ., data = dummy_data, subset = train)
+#qda_fit <- MASS::qda(label ~ ., data = task1_train, subset = train)
 
 ```
 
 #### KNN
-
 ```{r knn, echo=TRUE}
-knn <- knn3(label ~., data = task1_train, k=1)
+knn <- knn3(label ~., data = task1_train, k=1) # base case of k=1, alternatives explored later
 knn_preds <- predict(knn, newdata = task1_test, type = "prob")
 knn_conf_matrix <- table(knn_preds[,2], task1_test$label)
 eval_metrics("KNN", knn_conf_matrix)
@@ -245,27 +236,14 @@ svm_conf_matrix <- table(svm_predictions, task1_test$label)
 ## T1.2.PCA
 
 ```{r pca fit & data}
-pca <- prcomp(~., data = task1data[2:ncol(task1data)])
-top10_weights <- pca$rotation[,1:10]
-reduced_data <- pca$x[,1:10] |> as.data.frame()
-reduced_data$label <- task1data$label
+pca <- prcomp(~., data = task1data[2:ncol(task1data)]) # conducting pca
+top10_weights <- pca$rotation[,1:10] 
+reduced_data <- pca$x[,1:10] |> as.data.frame() # only keeping top ten components
+reduced_data$label <- task1data$label # reassigning labels; PCA maintains row order
 ```
 
 ```{r pca plot, echo=TRUE}
 table_pca <- rbind(pca$rotation[,1:20], summary(pca)$importance[,1:20])
-
-
-# var_props <- data.frame(PC = 1:10, 'PVE' = table_pca['Proportion of Variance',])
-"
-ggplot(var_props, aes(x=PC, y=PVE)) + 
-  geom_line() + 
-  geom_point() + 
-  xlab('Principal Components') + 
-  ylab('Proportion of Variance Remaining') + 
-  xlim(0, .5)
-  "
-
-
 
 par(mfrow=c(1,1))
 plot(table_pca['Proportion of Variance',], 
@@ -500,74 +478,8 @@ pca_tuned_knn_conf_matrix <- table(pca_tuned_knn, reduced_test$label)
 
 ```
 
-#### Random Forest COULD CHANGE TO SVM
-
-```{r rf mtry tuning, echo=TRUE}
-
-rf_metrics <- eval_metrics("Base Model", rf_conf_matrix)
-
-parameter_pool_sizes <- (ncol(task1_train) |> sqrt() |> round(digits = 0)-25) : (ncol(task1_train) |> sqrt() |> round(digits = 0)+25)
-
-for (i in 110:125){
-  model <- ranger(label~., 
-             data = task1_train, 
-             mtry = i,
-             importance = "none",
-             write.forest = TRUE,
-             num.trees = 1000,
-             classification = TRUE)
-
-  preds <- predict(model, data=task1_test)$predictions
-
-  conf_matrix <- table(preds, task1_test$label)
-  
-  rf_metrics <- rbind(rf_metrics, eval_metrics(paste("mtry =", as.character(i)), conf_matrix)) 
-  
-  print(i)
-  
-}
-
-
-rf_metrics$index <- c(64, parameter_pool_sizes, 90:110, 110:125)
-
-ggplot(rf_metrics, aes(x=index, F1)) + 
-  geom_line() +
-  geom_point() +
-  geom_vline(xintercept = which.max(rf_metrics$F1) + 37, linetype = "dashed", color = "blue") + 
-  #xlim(1,nrow(rf_metrics)) + 
-  xlab("Feature Pool Size") + 
-  ylab("F1 Score") +
-  ggtitle("Selecting k to Maximize F1 Score for Dimension-Reduced Models") +
-  theme_linedraw() + 
-  theme(plot.title = element_text(hjust = 0.5)) 
-
-
-```
-```{r INEFFECTIVE rf threshold selection}
-
-# Predict on the Validation Set
-
-# Random Forest Model Predictions
-rf_validation_preds <- predict(rf, data = task1_validation[2:ncol(task1_validation)], type = "response")$predictions
-
-# Calculate PR Curves Using Validation Labels (y_val)
-
-# PR Curve for Lasso    Precision-Recall
-rf_validation_pr_curve <- pr.curve(scores.class0 = rf_validation_preds, weights.class0 = task1_validation$label, curve = TRUE)
-
-cat("PR AUC (Random Forest, Validation Set):", rf_validation_pr_curve$auc.integral, "\n") # output
-
-
-# Create Data Frames for Precision-Recall Curves
-rf_curve_df <- data.frame(Model = "Random Forest", 
-                          Recall = rf_validation_pr_curve$curve[, 1], 
-                          Precision = rf_validation_pr_curve$curve[, 2], 
-                          Threshold = rf_validation_pr_curve$curve[, 3])
-
-```
 
 #### GBDT
-
 
 One classifier to improve upon is Gradient Boosted Decision Trees. First, we will tune the shrinkage and interaction (tree) depth hyperparameters, and then we will use the optimal setup we found to tune the right decision threshold. 
 
@@ -720,19 +632,19 @@ tuned_svm_conf_matrix <- table(tuned_svm_preds, reduced_test$label)
 # need to add ROC / AUC info
 
 base_summary_table <- rbind(eval_metrics("LDA", lda_conf_matrix), 
-                       c("QDA", rep(NA,3)),
                        eval_metrics("Logistic Regression", logistic_conf_matrix),
+                       c("QDA", rep(NA,3)),
                        eval_metrics("1NN", knn_conf_matrix),
-                       eval_metrics("Random Forest", rf_conf_matrix),
                        eval_metrics("GBDT", gbdt_conf_matrix),
+                       eval_metrics("Random Forest", rf_conf_matrix),
                        eval_metrics("SVM", svm_conf_matrix))
 
 pca_summary_table <- rbind(eval_metrics("LDA", pca_lda_conf_matrix), 
-                       eval_metrics("QDA", pca_qda_conf_matrix),
                        eval_metrics("Logistic Regression", pca_logistic_conf_matrix),
+                       eval_metrics("QDA", pca_qda_conf_matrix),
                        eval_metrics("KNN", pca_knn_conf_matrix),
-                       eval_metrics("Random Forest", pca_rf_conf_matrix),
                        eval_metrics("GBDT", pca_gbdt_conf_matrix),
+                       eval_metrics("Random Forest", pca_rf_conf_matrix),
                        eval_metrics("SVM", pca_svm_conf_matrix))
 
 
@@ -749,11 +661,11 @@ tuned_summary_table <- rbind(eval_metrics("9NN", pca_tuned_knn_conf_matrix),
 lda_roc_curve <- roc(task1_test$label, lda_pred |> as.numeric(), levels = c(0,1), direction = "<")
 lda_auc <- auc(lda_roc_curve)
 
-logistic_roc_curve <- roc(task1_test$label, logistic_probs |> as.numeric(), levels = c(0,1), direction = "<")
-logisitc_auc <- auc(logistic_roc_curve)
-
 # qda_roc_curve <- roc(task1_test$label, qda_pred |> as.numeric(), levels = c(0,1), direction = "<")
 # auc(qda_roc_curve)
+
+logistic_roc_curve <- roc(task1_test$label, logistic_probs |> as.numeric(), levels = c(0,1), direction = "<")
+logisitc_auc <- auc(logistic_roc_curve)
 
 knn_roc_curve <- roc(task1_test$label, knn_preds[,2] |> as.numeric(), levels = c(0,1), direction = "<")
 knn_auc <- auc(knn_roc_curve)
@@ -767,10 +679,10 @@ rf_auc <- auc(rf_roc_curve)
 svm_roc_curve <- roc(task1_test$label, svm_predictions |> as.numeric(), levels = c(0,1), direction = "<")
 svm_auc <- auc(svm_roc_curve)
 
-base_summary_table$AUC <- c(lda_auc, NA, logisitc_auc, knn_auc, rf_auc, gbdt_auc,  svm_auc) |> round(digits = 3)
+base_summary_table$AUC <- c(lda_auc, logisitc_auc, NA, knn_auc, gbdt_auc, rf_auc, svm_auc) |> round(digits = 3)
 ```
 
-```{r pc auc curves}
+```{r pca auc curves}
 pca_lda_roc_curve <- roc(reduced_test$label, pca_lda_pred |> as.numeric(), levels = c(0,1), direction = "<")
 pca_lda_auc <- auc(pca_lda_roc_curve)
 
@@ -793,7 +705,7 @@ pca_svm_roc_curve <- roc(task1_test$label, pca_svm_predictions |> as.numeric(), 
 pca_svm_auc <- auc(pca_svm_roc_curve)
 
 
-pca_summary_table$AUC <- c(pca_lda_auc, pca_qda_auc, pca_logisitc_auc,  pca_knn_auc, pca_rf_auc, pca_gbdt_auc, pca_svm_auc) |> round(digits = 3)
+pca_summary_table$AUC <- c(pca_lda_auc, pca_logisitc_auc, pca_qda_auc, pca_knn_auc, pca_gbdt_auc, pca_rf_auc, pca_svm_auc) |> round(digits = 3)
 ```
 
 ```{r tuned auc curves}
