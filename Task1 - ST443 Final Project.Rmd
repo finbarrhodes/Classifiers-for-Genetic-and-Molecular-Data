@@ -498,11 +498,13 @@ ggplot(knn_metrics, aes(x=(1:nrow(knn_metrics)), F1)) +
 ggplot(pca_knn_metrics, aes(x=(1:nrow(pca_knn_metrics)), F1)) + 
   geom_line() +
   geom_point() +
-  geom_vline(xintercept = which.max(pca_knn_metrics$F1), linetype = "dashed", color = "blue") + 
+  geom_vline(xintercept = which.max(pca_knn_metrics$F1), linetype = "dashed", color = "red") + 
+  geom_hline(yintercept = max(knn_metrics$F1), linetype = "solid", color = "dark grey") + 
+  annotate("text",x = 17.5 , y = max(knn_metrics$F1) -.015, label = "Optimal kNN on Full Data", color = "dark grey") +
   xlim(1,nrow(pca_knn_metrics)) + 
   xlab("Number of Neighbors") + 
   ylab("F1 Score") +
-  ggtitle("Selecting k to Maximize F1 Score for Dimension-Reduced Models") +
+  # ggtitle("Selecting k to Maximize F1 Score for Dimension-Reduced Models") +
   theme_linedraw() + 
   theme(plot.title = element_text(hjust = 0.5)) 
 
@@ -565,18 +567,18 @@ for (lambda in lambdas) {
   }
 }
 
-gbdt_metrics$index <- 1:nrow(gbdt_metrics)
+gbdt_metrics$index <- 1:nrow(gbdt_metrics) # indexes for different combinations of hyperparameters
 
 ggplot(gbdt_metrics[2:nrow(gbdt_metrics),], aes(x=index, F1)) + 
   geom_line() +
   geom_point() +
-  geom_hline(yintercept = gbdt_metrics$F1[1], linetype = "solid", color = "black") + 
-  annotate("text", x=1.75, y=gbdt_metrics$F1[1]+.0075, label = "Base Model") +
+  geom_hline(yintercept = gbdt_metrics$F1[1], linetype = "solid", color = "dark grey") + 
+  annotate("text", x=1.7, y=gbdt_metrics$F1[1]+.005, label = "Base Model", color = "dark grey") +
   geom_vline(xintercept = which.max(gbdt_metrics$F1), linetype = "dashed", color = "red") + 
   xlim(1,nrow(gbdt_metrics)) + 
   xlab("Setup Index") + 
   ylab("F1 Score") +
-  ggtitle("Selecting Shrinkage and Depth to Maximize F1 Score") +
+  # ggtitle("Selecting Shrinkage and Depth to Maximize F1 Score") +
   theme_linedraw() + 
   theme(plot.title = element_text(hjust = 0.5)) 
 
@@ -757,7 +759,7 @@ mypredict <- function(){
   ### returns predictions, one per row, in the same order as test.csv.gz
   
   # shuffling data 
-  data <- read.csv("/Users/finbarrhodes/Documents/ST443/Final Project/data1.csv.gz") # test.csv.gz
+  data <- read.csv("test.csv.gz") # test.csv.gz
   data$label <- if_else(data$label == "TREG", 1, 0)
   
   # predict on top model from T1.3
