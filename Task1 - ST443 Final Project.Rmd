@@ -1,6 +1,6 @@
 ---
 title: "Task 1 - ST443 Project"
-author: "Finbar Rhodes"
+author: ""
 date: "`r Sys.Date()`"
 output: html_document
 ---
