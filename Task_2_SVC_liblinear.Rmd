@@ -78,7 +78,7 @@ library(Matrix)
 # y_train <- as.factor(y_train)  # Convert to factor if it's classification
 
 tryTypes=c(1,2,3,4,6)
-tryCosts=c( 6.5, 6, 5.5)
+tryCosts=c(100, 10, 7, 6, 5,1,0.1)
 bestCost=NA
 bestAcc=0
 bestType=NA
@@ -121,8 +121,9 @@ feature_rank_svm <- order(feature_impor_svm, decreasing = T)
 class_weights <- c("0" = 1, "1" = length(y_valid)/sum(y_valid))
 #First model
 k_fea <- 2
+min_k <- 70
 # Initialize variables
-k_values <- seq(70, 90, by = 2)  # Test k_fea values from 100 to 1000 in steps of 100
+k_values <- seq(min_k, 90, by = 2)  # Test k_fea values from 100 to 1000 in steps of 100
 max_balanced_acc <- -Inf             # To store the maximum balanced accuracy
 best_k_fea <- NULL                   # To store the best k_fea
 df_data_train <- as.data.frame(as.matrix(sparse_data_train))
@@ -254,8 +255,7 @@ for (threshold_svm in threshold_values_svm) {
 
 # Plot Balanced Accuracy vs Threshold
 ggplot(threshold_results_svm, aes(x = Threshold_svm, y = BalancedAccuracy_svm)) +
-  geom_line(color = "blue", size = 1) +
-  geom_point(color = "red", size = 2) +
+  geom_line(color = "black", size = 1) +
   labs(
     title = "Balanced Accuracy vs Threshold with Maximum Balanced Accuracy (SVM with", k_fea, " features)",
     x = "Threshold",
@@ -294,9 +294,9 @@ print(balan_acc_svm_test)
 
 ```
 
-
 ```{r}
-
+# -----------
+#First model
 set.seed(12)
 bestType <- 6
 
@@ -315,8 +315,9 @@ feature_rank_svm <- order(feature_impor_svm, decreasing = T)
 class_weights <- c("0" = 1, "1" = length(y_valid)/sum(y_valid))
 #First model
 k_fea <- 2
+min_k <- 118
 # Initialize variables
-k_values <- seq(30, 90, by = 2)  # Test k_fea values from 100 to 1000 in steps of 100
+k_values <- seq(min_k, 118, by = 2)  # Test k_fea values from 100 to 1000 in steps of 100
 max_balanced_acc <- -Inf             # To store the maximum balanced accuracy
 best_k_fea <- NULL                   # To store the best k_fea
 df_data_train <- as.data.frame(as.matrix(sparse_data_train))
@@ -345,13 +346,11 @@ for (k_fea in k_values) {
     verbose = FALSE
   )
   
-  predictions_svm_valid_list_it <- predict( final_model_svm_red , sparse_data_valid, proba = TRUE)
+  # Step 4: Make predictions on the validation data
+  predictions_svm_valid_list <- predict( final_model_svm_red , sparse_data_valid, proba = TRUE)
   
-  predictions_svm_valid_it <- predictions_svm_valid_list_it$probabilities[, 2]
-  predicted_classes_svm_valid_it <- ifelse(predictions_svm_valid_it > sum(y_valid)/length(y_valid), 1, 0)
-  conf_matrix_svm_valid <- table(Predicted = predicted_classes_svm_valid_it, Actual = y_valid)
-  
-
+  # Step 5: Compute the confusion matrix
+  conf_matrix_svm_valid <- table( Predicted = predictions_svm_valid_list$predictions , Actual = y_valid )
   
   tn_svm_v <- conf_matrix_svm_valid[1, 1]
   tp_svm_v <- conf_matrix_svm_valid[2, 2]
@@ -450,8 +449,7 @@ for (threshold_svm in threshold_values_svm) {
 
 # Plot Balanced Accuracy vs Threshold
 ggplot(threshold_results_svm, aes(x = Threshold_svm, y = BalancedAccuracy_svm)) +
-  geom_line(color = "blue", size = 1) +
-  geom_point(color = "red", size = 2) +
+  geom_line(color = "black", size = 1) +
   labs(
     title = "Balanced Accuracy vs Threshold with Maximum Balanced Accuracy (SVM with", k_fea, " features)",
     x = "Threshold",
@@ -488,9 +486,4 @@ balan_acc_svm_test = 0.5*( tp_svm_t / (tp_svm_t+fn_svm_t) + tn_svm_t / (tn_svm_t
 print(balan_acc_svm_test)
 
 
-
-
 ```
-
-
-
