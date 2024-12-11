@@ -22,6 +22,7 @@ library(ranger)
 library(e1071)
 library(lattice)
 library(PRROC)
+library(glmnet)
 ```
 
 ```{r reading in data, echo=TRUE}
@@ -225,7 +226,7 @@ rf_conf_matrix <- table(rf_preds, task1_test$label)
 svmfit = svm(label ~ ., data = task1_train, 
              kernel = "linear", 
              type = "C-classification",
-             cost = 10)
+             cost = 1)
 
 svm_predictions <- predict(svmfit, newdata = task1_test[2:ncol(task1_test)], probabilities = TRUE)
 svm_conf_matrix <- table(svm_predictions, task1_test$label)
@@ -375,7 +376,7 @@ eval_metrics("RF", pca_rf_conf_matrix)
 pca_svmfit = svm(label ~ ., data = reduced_train, 
              kernel = "linear", 
              type = "C-classification",
-             cost = 10)
+             cost = 1)
 
 pca_svm_predictions <- predict(pca_svmfit, newdata = reduced_test, probabilities = TRUE)
 pca_svm_conf_matrix <- table(pca_svm_predictions, reduced_test$label)
@@ -387,11 +388,63 @@ eval_metrics("PCA SVM", pca_svm_conf_matrix)
 ## T1.3
 
 Classifiers to tweak:
+- Logistic Regression via Lasso Regularization
 - KNN via Tuning *k*
 - GBDT via Tuning Depth, Shrinkage, and Decision Threshold
-- SVM via Tuning Cost (Margin) Parameter
 
 In this section, we bring in the validation set (15% of the data) to tune hyperparameters, settle on an optimal setup, and then reevaluate on the test set. 
+
+
+#### Logistic Regression
+
+```{r lasso glmnet}
+
+train_matrix <- model.matrix(label~., data = task1_train)[,-1]
+test_matrix <- model.matrix(label~., data = task1_test)[,-1]
+response <- task1_train$label
+
+lasso <- glmnet(train_matrix, response, family = "binomial", alpha=1)
+cv_lasso <- cv.glmnet(train_matrix, response, family = "binomial", type.measure = "class", alpha=1)
+optimal_lambda <- cv_lasso$lambda.1se
+
+```
+
+
+```{r lasso threshold selection and implementation}
+validation_matrix <- model.matrix(label~., data = task1_validation)[,-1]
+
+# Predict on the Validation Set
+lasso_validation_preds <- predict(lasso, newx = validation_matrix, type = "response", s = optimal_lambda) # from cv_lasso / cv.glmnet() output above
+
+# Calculate PR Curves Using Validation Labels (y_val)
+lasso_validation_pr_curve <- pr.curve(scores.class0 = lasso_validation_preds, weights.class0 = task1_validation$label, curve = TRUE)
+
+
+cat("PR AUC (lasso, Validation Set):", lasso_validation_pr_curve$auc.integral, "\n") # output
+
+
+# Create Data Frames for Precision-Recall Curves
+lasso_curve_df <- data.frame(Model = "Logistic lasso Regression", 
+                          Recall = lasso_validation_pr_curve$curve[, 1], 
+                          Precision = lasso_validation_pr_curve$curve[, 2], 
+                          Threshold = lasso_validation_pr_curve$curve[, 3])
+
+lasso_validation_pr_curve |> plot()
+
+# Compute F1 Scores and Find Optimal Thresholds
+lasso_curve_df <- lasso_curve_df |> mutate(F1 = 2 * (Precision * Recall) / (Precision + Recall + 1e-6))  # '+ 1e-6' to avoid division by zero
+
+lasso_threshold <- lasso_curve_df[which.max(lasso_curve_df$F1),4]
+
+lasso_probs <- predict(lasso, newx = test_matrix, type = "response", s = optimal_lambda) # from cv_lasso / cv.glmnet() output above
+
+lasso_preds <-  rep(0, length(lasso_probs))
+lasso_preds <- ifelse(lasso_probs > lasso_threshold, 1, 0)
+
+lasso_conf_matrix <- table(lasso_preds, task1_test$label)
+
+```
+
 
 #### KNN
 
@@ -461,7 +514,7 @@ ggplot(pca_knn_metrics, aes(x=(1:nrow(pca_knn_metrics)), F1)) +
 tuned_1nn <- knn3Train(task1_train[2:ncol(task1_train)], 
                        task1_test[2:ncol(task1_test)], 
                        task1_train$label, 
-                       k=5, 
+                       k=6, 
                        prob = TRUE, 
                        use.all=TRUE)
 
@@ -470,7 +523,7 @@ tuned_1nn_conf_matrix <- table(tuned_1nn, task1_test$label)
 pca_tuned_knn <- knn3Train(reduced_train[2:ncol(reduced_train)], 
                        reduced_test[2:ncol(reduced_test)], 
                        reduced_train$label, 
-                       k=9, 
+                       k=5, 
                        prob = TRUE, 
                        use.all=TRUE)
 
@@ -487,7 +540,7 @@ One classifier to improve upon is Gradient Boosted Decision Trees. First, we wil
 gbdt_metrics <- eval_metrics("Base Model", gbdt_conf_matrix)
 # Define grid of lambda (shrinkage) values to evaluate
 lambdas <- c(.001, .01, .025, .05)
-depths <- c(1,2,3,4,5,6)
+depths <- c(2,3,4,5,6)
 # Loop over each lambda value
 for (lambda in lambdas) {
   for (depth in depths){
@@ -543,7 +596,7 @@ paste("Optimal setup for our Gradient Boosted Decision Tress is", gbdt_metrics[w
 tuned_gbdt <- gbm(label ~ ., data = task1_train, 
                      distribution = "bernoulli", 
                      n.trees = 1000, 
-                     interaction.depth = 5, 
+                     interaction.depth = 3, 
                      shrinkage = .05)
 
 # Predict on the Validation Set
@@ -570,7 +623,7 @@ gbdt_validation_pr_curve |> plot()
 ```{r gbdt optimal threshold implementation}
 
 # Compute F1 Scores and Find Optimal Thresholds
-gbdt_curve_df <- gbdt_curve_df |> mutate(F1 = 2 * (Precision * Recall) / (Precision + Recall + 1e-6))  # Avoid division by zero
+gbdt_curve_df <- gbdt_curve_df |> mutate(F1 = 2 * (Precision * Recall) / (Precision + Recall + 1e-6))  # '+ 1e-6' to avoid division by zero
 
 gbdt_threshold <- gbdt_curve_df[which.max(gbdt_curve_df$F1),4]
 
@@ -583,47 +636,6 @@ tuned_gbdt_conf_matrix <- table(tuned_gbdt_preds, task1_test$label)
 
 ```
 
-
-
-#### SVM
-
-```{r pca svm cost tuning}
-
-pca_svm_validation_preds <- predict(pca_svmfit, newdata = reduced_validation[1:ncol(reduced_validation)-1], probabilities = TRUE)
-pca_svm_validation_conf_matrix <- table(pca_svm_validation_preds, reduced_validation$label)
-pca_svm_metrics <- eval_metrics("Cost = 10 (Base + PCA)", pca_svm_validation_conf_matrix)
-
-# set costs list to iterate through
-costs <- c(.1, .25, .5, 1, 2.5, 5, 20)
-
-# within loop, fit on training, predict and evaluate on validation
-for (i in costs){
-  
-  pca_model <- svm(label ~ ., data = reduced_train, 
-             kernel = "linear", 
-             type = "C-classification",
-             cost = i)
-  
-  pca_predictions <- predict(pca_model, newdata = reduced_validation[1:ncol(reduced_validation)-1], probabilities = TRUE)
-  pca_conf_matrix <- table(pca_predictions, reduced_validation$label)
-  pca_svm_metrics <- rbind(pca_svm_metrics, eval_metrics(paste("Cost =", as.character(i)), pca_conf_matrix))
-
-}
-pca_svm_metrics
-
-```
-
-```{r SVM FINAL, echo=TRUE}
-
-tuned_svm <- svm(label ~ ., data = reduced_train, 
-             kernel = "linear", 
-             type = "C-classification",
-             cost = 5)
-
-tuned_svm_preds <- predict(tuned_svm, newdata = reduced_test[1:ncol(reduced_test)-1], probabilities = TRUE)
-tuned_svm_conf_matrix <- table(tuned_svm_preds, reduced_test$label)
-
-```
 
 ## Model Evaluation
 
@@ -650,10 +662,11 @@ pca_summary_table <- rbind(eval_metrics("LDA", pca_lda_conf_matrix),
 
 tuned_summary_table <- rbind(eval_metrics("9NN", pca_tuned_knn_conf_matrix),
                        eval_metrics("GBDT with Optimal Threshold", tuned_gbdt_conf_matrix), 
-                       eval_metrics("SVM with Optimal Cost", tuned_svm_conf_matrix))
+                       eval_metrics("Logistic with Lasso ", lasso_conf_matrix))
 
 
 ```
+
 
 ```{r base auc curves, echo=TRUE}
 
@@ -715,15 +728,15 @@ pca_tuned_knn_auc <- auc(pca_knn_roc_curve)
 tuned_gbdt_roc_curve <- roc(reduced_test$label, tuned_gbdt_preds |> as.numeric(), levels = c(0,1), direction = "<")
 tuned_gbdt_auc <- auc(tuned_gbdt_roc_curve)
 
-tuned_svm_roc_curve <- roc(reduced_test$label, tuned_svm_preds |> as.numeric(), levels = c(0,1), direction = "<")
-tuned_svm_auc <- auc(tuned_svm_roc_curve)
+lasso_roc_curve <- roc(task1_test$label, lasso_preds |> as.numeric(), levels = c(0,1), direction = "<")
+lasso_auc <- auc(lasso_roc_curve)
 
-tuned_summary_table$AUC <- c(pca_tuned_knn_auc, tuned_gbdt_auc, tuned_svm_auc) |> round(digits = 3)
+tuned_summary_table$AUC <- c(pca_tuned_knn_auc, tuned_gbdt_auc, lasso_auc) |> round(digits = 3)
 
 ```
 
 
-```{r}
+```{r final tables}
 base_summary_table
 
 pca_summary_table
@@ -735,7 +748,7 @@ tuned_summary_table
 
 ### mypredict()
 
-```{r function implementation}
+```{r mypredict() function}
 
 mypredict <- function(){
   
