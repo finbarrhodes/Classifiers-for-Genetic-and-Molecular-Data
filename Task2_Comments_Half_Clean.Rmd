@@ -44,11 +44,10 @@ print(non_binding_count)
 png("plot_name.png", width = 800, height = 600)
 ggplot(data, aes(x = data[, 1])) +
   geom_bar() +
-  labs(x = "Binding Status", y = "Count") +
+  labs(x = "Amount of Binding compunds", y = "Count") +
   theme_minimal()
 dev.off()
 ```
-
 
 
 ```{r}
@@ -56,9 +55,6 @@ feature_sum <- colSums(data[, 2:100001])
 hist(feature_sum, breaks = 50, main = "Distribution of Feature Sums", xlab = "Sum of binary feature values")
 ```
 
-```{r}
-head(data)
-```
 
 ```{r}
 # Iterate through label and make them 0 if they are -1, 1 otherwise
@@ -79,7 +75,7 @@ unique_data <- data[, !duplicated(as.list(data))]
 cat("The new dataset has dimensions:", dim(unique_data), "\n")
 ```
 
-To compare our models we mesure their performance on unseen data. So we split the dataset in training validation and test data (70,15,15)
+To compare our models we measure their performance on unseen data. So we split the dataset in training validation and test data (70,15,15)
 ```{r}
 # Calculate row indices for each split
 set.seed(12)
@@ -90,8 +86,8 @@ end_validation <- floor(n * 0.85)  # Next 15% for validation
 
 # Split the data into training, validation, and testing sets
 training_data <- unique_data[1:end_training, ]  # 70% of the data
-validation_data <- unique_data[(end_training + 1):end_validation, ]  # 10% of the data
-testing_data <- unique_data[(end_validation + 1):n, ]  # Remaining 20% of the data
+validation_data <- unique_data[(end_training + 1):end_validation, ]  # 15% of the data
+testing_data <- unique_data[(end_validation + 1):n, ]  # Remaining 15% of the data
 
 # Print dimensions of each set
 print(dim(training_data))   
@@ -100,6 +96,7 @@ print(dim(testing_data))
 
 ```
 
+--- Regularisation Methods ---
 
 Lets build Lasso and Elastic Net with the training data
 ```{r}
@@ -107,7 +104,6 @@ set.seed(12)
 library(Matrix)
 library(glmnet)
 
-#create dep. var
 y_train <- training_data[,1]
 y_val <- validation_data[ ,1]
 y_true <- testing_data[,1]
@@ -115,15 +111,15 @@ y_true <- testing_data[,1]
 #create training, validation and testing matrix with ind.var
 features_train <- training_data[,-1]
 sparse_data_train <- as(features_train, "sparseMatrix")
-
 features_val <- validation_data[,-1]
 sparse_data_val <- as(features_val, "sparseMatrix")
-
 features_test<- testing_data[,-1]
 sparse_data_test <- as(features_test, "sparseMatrix")
+```
 
 
-#LASSO CLEAN
+```{r}
+# LASSO method
 cv_fit_1d <- cv.glmnet(sparse_data_train, y_train, family = "binomial", parallel = TRUE, alpha= 1)
 selected_features_1d <- coef(cv_fit_1d, s = "lambda.min")
 print(cv_fit_1d$lambda.min)
@@ -136,7 +132,7 @@ print(selected_features_nonzero_1d)
 
 ```{r}
 set.seed(12)
-#Elastic Net CLEAN
+#Elastic Net method
 cv_fit_3d <- cv.glmnet(sparse_data_train, y_train, family = "binomial", parallel = TRUE, alpha= 1/2)
 selected_features_3d <- coef(cv_fit_3d, s = "lambda.min")
 print(cv_fit_3d$lambda.min)
@@ -183,8 +179,6 @@ calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, mod
   for (threshold in thresholds) {
     # Convert probabilities to binary predictions
     predicted_classes <- ifelse(predictions > threshold, 1, 0)
-    
-    # Create confusion matrix
     conf_matrix <- table(Predicted = predicted_classes, Actual = y_actual)
     
     # Extract TP, TN, FP, FN (handle missing categories with tryCatch)
@@ -193,10 +187,8 @@ calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, mod
     fp <- tryCatch(conf_matrix[2, 1], error = function(e) 0)
     fn <- tryCatch(conf_matrix[1, 2], error = function(e) 0)
     
-    # Calculate balanced accuracy
+    # Calculate balanced accuracy and append results
     balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) # Add small value to avoid division by zero
-    
-    # Append results
     results <- rbind(results, data.frame(Threshold = threshold, BalancedAccuracy = balanced_acc, Model = model_name))
   }
   return(results)
@@ -211,7 +203,6 @@ threshold_results <- rbind(threshold_results_L, threshold_results_EN)
 
 # Plot Balanced Accuracy vs Threshold
 library(ggplot2)
-
 
 ggplot(threshold_results, aes(x = Threshold, y = BalancedAccuracy, color = Model)) +
   geom_line(size = 1) +
@@ -241,11 +232,10 @@ cat("Balanced Accuracy:", max_balanced_accuracy_EN$BalancedAccuracy, "\n")
 ```{r}
 library(PRROC)
 
-# Predict on the test to see performance 
+# Predict on the test to evaluate performance 
 # Lasso Model Predictions
 predictions_1d_test <- predict(cv_fit_1d, sparse_data_test, s = "lambda.min", type = "response")
-
-# Elastic Net Model Predictions (assuming you have cv_fit_3d for Elastic Net)
+# Elastic Net Model Predictions 
 predictions_3d_test <- predict(cv_fit_3d, sparse_data_test, s = "lambda.min", type = "response")
 
 ```
@@ -253,9 +243,8 @@ predictions_3d_test <- predict(cv_fit_3d, sparse_data_test, s = "lambda.min", ty
 
 ```{r}
 # Measure performance on unseen data using the true y
-# Convert probabilities to binary predictions using the optimal threshold for each model (tuning the parameters)
+# Optimal Threshold are input
 predicted_classes_lasso <- ifelse(predictions_1d_test > 0.034, 1, 0)
-
 predicted_classes_EN <- ifelse(predictions_3d_test > 0.029, 1, 0) 
 ```
 
@@ -275,10 +264,8 @@ calculate_balanced_accuracy<- function(conf_matrix) {
   FP <- conf_matrix[2, 1]
   FN <- conf_matrix[1, 2]
   TP <- conf_matrix[2, 2]
-  
-  sensitivity <- TP / (TP + FN)  # Sensitivity
-  specificity <- TN / (TN + FP)  # Specificity
-
+  sensitivity <- TP / (TP + FN)  
+  specificity <- TN / (TN + FP)  
   (sensitivity + specificity) / 2
 }
 ```
@@ -295,7 +282,6 @@ conf_matrix_EN <- table(Predicted = predicted_classes_EN, Actual = y_true)
 print("Confusion Matrix Elastic Net:")
 print(conf_matrix_EN)
 
-
 balanced_accuracy_L <- calculate_balanced_accuracy(conf_matrix_lasso)
 balanced_accuracy_EN <- calculate_balanced_accuracy(conf_matrix_EN)
 
@@ -304,6 +290,10 @@ cat("The Balanced Accuracy of Elastic Net on the test set is:", balanced_accurac
 
 ```
 
+--- Bagging and Boosting Methods ---
+
+The first model will use Random Forest with h2o library.
+
 ```{r}
 #h2o.shutdown(prompt = FALSE)
 options(java.parameters = "-Dai.h2o.disable.xgboost=true")
@@ -311,7 +301,6 @@ library(h2o)
 h2o.init()
 ```
 
------------ RANDOM FOREST ---------
 
 ```{r}
 #h2o.init(max_mem_size = "16G")
@@ -324,15 +313,15 @@ y <- colnames(training_data[1])
 
 # Train the H2O Random Forest Model
 rf_model <- h2o.randomForest(
-  x = x,                          # Predictors (column names)
-  y = y,                          # Target (name of the target column)
-  training_frame = train_h2o,     # Training data
+  x = x,                          
+  y = y,                          
+  training_frame = train_h2o,     
   ntrees = 100,                   # Number of trees
   max_depth = 15,                 # Maximum tree depth
   mtries = 1000,                  # Features considered per split
   min_rows = 20,                  # Minimum rows per leaf
-  sample_rate = 0.8,               # Row sampling rate
-  seed = 123 
+  sample_rate = 0.8,              # Row sampling rate
+  seed = 12 
 )
 
 # Retrieve variable importance
@@ -340,8 +329,6 @@ importance <- h2o.varimp(rf_model)
 # Plot variable importance
 h2o.varimp_plot(rf_model, num_of_features =75)
 head(importance[order(importance$relative_importance, decreasing = TRUE), ], 75)
-
-print(importance)
 
 
 cumulative_importance85 <- 0
@@ -376,15 +363,16 @@ length(selected_features100)
 ```
 
 ```{r}
+#Train the model
 rf_model_selected_85 <- h2o.randomForest(
   x = selected_features85,
   y = y,
   training_frame = train_h2o,
-  ntrees = 75,               # Fewer trees for small datasets
-  max_depth = 10,             # Restrict tree depth to avoid overfitting
-  mtries = 10,               # Use sqrt(number of features) for classification
-  min_rows = 5,              # Smaller minimum rows for better splits
-  sample_rate = 0.9,          # Slightly higher sampling rate for diversity
+  ntrees = 75,               
+  max_depth = 10,             
+  mtries = 10,              
+  min_rows = 5,              
+  sample_rate = 0.9,          
   seed = 123 
 )
 
@@ -405,22 +393,15 @@ calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, mod
   results <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric(), Model = character())
   
   for (threshold in thresholds) {
-    # Convert probabilities to binary predictions
     predicted_classes <- ifelse(predictions > threshold, 1, 0)
-    
-    # Create confusion matrix
     conf_matrix <- table(Predicted = predicted_classes, Actual = y_actual)
-    
-    # Extract TP, TN, FP, FN (handle missing categories with tryCatch)
     tn <- tryCatch(conf_matrix[1, 1], error = function(e) 0)
     tp <- tryCatch(conf_matrix[2, 2], error = function(e) 0)
     fp <- tryCatch(conf_matrix[2, 1], error = function(e) 0)
     fn <- tryCatch(conf_matrix[1, 2], error = function(e) 0)
     
-    # Calculate balanced accuracy
-    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) # Add small value to avoid division by zero
-    
-    # Append results
+    # Calculate balanced accuracy adn append
+    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) 
     results <- rbind(results, data.frame(Threshold = threshold, BalancedAccuracy = balanced_acc, Model = model_name))
   }
   return(results)
@@ -441,6 +422,7 @@ cat("Balanced Accuracy:", max_balanced_accuracy_rf_85$BalancedAccuracy, "\n")
 
 
 ```{r}
+#Train the model for 90% importance
 rf_model_selected_90 <- h2o.randomForest(
   x = selected_features90,
   y = y,
@@ -470,22 +452,15 @@ calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, mod
   results <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric(), Model = character())
   
   for (threshold in thresholds) {
-    # Convert probabilities to binary predictions
     predicted_classes <- ifelse(predictions > threshold, 1, 0)
-    
-    # Create confusion matrix
     conf_matrix <- table(Predicted = predicted_classes, Actual = y_actual)
-    
-    # Extract TP, TN, FP, FN (handle missing categories with tryCatch)
     tn <- tryCatch(conf_matrix[1, 1], error = function(e) 0)
     tp <- tryCatch(conf_matrix[2, 2], error = function(e) 0)
     fp <- tryCatch(conf_matrix[2, 1], error = function(e) 0)
     fn <- tryCatch(conf_matrix[1, 2], error = function(e) 0)
     
-    # Calculate balanced accuracy
-    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) # Add small value to avoid division by zero
-    
-    # Append results
+    # Calculate balanced accuracy adn append
+    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) 
     results <- rbind(results, data.frame(Threshold = threshold, BalancedAccuracy = balanced_acc, Model = model_name))
   }
   return(results)
@@ -506,16 +481,17 @@ cat("Balanced Accuracy:", max_balanced_accuracy_rf_90$BalancedAccuracy, "\n")
 
 
 ```{r}
-set.seed(123)
+set.seed(12)
+# Train the model with 95% importance
 rf_model_selected_95 <- h2o.randomForest(
   x = selected_features95,
   y = y,
   training_frame = train_h2o,
-  ntrees = 75,               # Fewer trees for small datasets
-  max_depth = 10,             # Restrict tree depth to avoid overfitting
-  mtries = 10,               # Use sqrt(number of features) for classification
-  min_rows = 5,              # Smaller minimum rows for better splits
-  sample_rate = 0.9,          # Slightly higher sampling rate for diversity
+  ntrees = 75,               
+  max_depth = 10,            
+  mtries = 10,              
+  min_rows = 5,             
+  sample_rate = 0.9,         
   seed = 123 
 )
 
@@ -536,27 +512,19 @@ calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, mod
   results <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric(), Model = character())
   
   for (threshold in thresholds) {
-    # Convert probabilities to binary predictions
     predicted_classes <- ifelse(predictions > threshold, 1, 0)
-    
-    # Create confusion matrix
     conf_matrix <- table(Predicted = predicted_classes, Actual = y_actual)
-    
-    # Extract TP, TN, FP, FN (handle missing categories with tryCatch)
     tn <- tryCatch(conf_matrix[1, 1], error = function(e) 0)
     tp <- tryCatch(conf_matrix[2, 2], error = function(e) 0)
     fp <- tryCatch(conf_matrix[2, 1], error = function(e) 0)
     fn <- tryCatch(conf_matrix[1, 2], error = function(e) 0)
     
-    # Calculate balanced accuracy
-    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) # Add small value to avoid division by zero
-    
-    # Append results
+    # Calculate balanced accuracy adn append
+    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) 
     results <- rbind(results, data.frame(Threshold = threshold, BalancedAccuracy = balanced_acc, Model = model_name))
   }
   return(results)
 }
-
 # Calculate balanced accuracy
 threshold_results_rf_95<- calculate_balanced_accuracy_1(predictions_rf, y_val, threshold_values, "Random Forest")
 
@@ -572,15 +540,16 @@ cat("Balanced Accuracy:", max_balanced_accuracy_rf_95$BalancedAccuracy, "\n")
 
 
 ```{r}
+#Train the model with 100%
 rf_model_selected_100 <- h2o.randomForest(
   x = selected_features100,
   y = y,
   training_frame = train_h2o,
-  ntrees = 75,               # Fewer trees for small datasets
-  max_depth = 10,             # Restrict tree depth to avoid overfitting
-  mtries = 10,               # Use sqrt(number of features) for classification
-  min_rows = 5,              # Smaller minimum rows for better splits
-  sample_rate = 0.9,          # Slightly higher sampling rate for diversity
+  ntrees = 75,               
+  max_depth = 10,             
+  mtries = 10,              
+  min_rows = 5,             
+  sample_rate = 0.9,         
   seed = 123 
 )
 
@@ -601,27 +570,19 @@ calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, mod
   results <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric(), Model = character())
   
   for (threshold in thresholds) {
-    # Convert probabilities to binary predictions
     predicted_classes <- ifelse(predictions > threshold, 1, 0)
-    
-    # Create confusion matrix
     conf_matrix <- table(Predicted = predicted_classes, Actual = y_actual)
-    
-    # Extract TP, TN, FP, FN (handle missing categories with tryCatch)
     tn <- tryCatch(conf_matrix[1, 1], error = function(e) 0)
     tp <- tryCatch(conf_matrix[2, 2], error = function(e) 0)
     fp <- tryCatch(conf_matrix[2, 1], error = function(e) 0)
     fn <- tryCatch(conf_matrix[1, 2], error = function(e) 0)
     
-    # Calculate balanced accuracy
-    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) # Add small value to avoid division by zero
-    
-    # Append results
+    # Calculate balanced accuracy adn append
+    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) 
     results <- rbind(results, data.frame(Threshold = threshold, BalancedAccuracy = balanced_acc, Model = model_name))
   }
   return(results)
 }
-
 # Calculate balanced accuracy
 threshold_results_rf_100<- calculate_balanced_accuracy_1(predictions_rf, y_val, threshold_values, "Random Forest")
 
@@ -716,12 +677,12 @@ print(model_results)
 # Convert training and validation data to H2O frames
 train_h2o <- as.h2o(training_data)
 val_h2o <- as.h2o(validation_data)
-train_h2o[, y] <- as.factor(train_h2o[, y])  # Convert the response column in training set to factor
-val_h2o[, y] <- as.factor(val_h2o[, y])      # Convert the response column in validation set to factor
+train_h2o[, y] <- as.factor(train_h2o[, y])  
+val_h2o[, y] <- as.factor(val_h2o[, y])      
 
 # Ensure the response column is correctly set
-train_h2o[, "label"] <- as.factor(train_h2o[, "label"])  # Convert to factor for classification
-val_h2o[, "label"] <- as.factor(val_h2o[, "label"])      # Convert to factor for classification
+train_h2o[, "label"] <- as.factor(train_h2o[, "label"])  
+val_h2o[, "label"] <- as.factor(val_h2o[, "label"])      
 
 # Define predictors and response
 x <- setdiff(h2o.colnames(train_h2o), "label")  # All columns except the target
@@ -780,14 +741,14 @@ length(selected_features_gbm_100)
 ```
 
 
-
+The selected model has a cumulative importance of 85% over the first set of features 
 
 ```{r}
 gbm_model_selected85 <- h2o.gbm(
-  x = selected_features_gbm_85,         # Only the selected features
-  y = y,                         # Response variable
-  training_frame = train_h2o,    # Original training data
-  validation_frame = val_h2o,    # Original validation data
+  x = selected_features_gbm_85,         
+  y = y,                         
+  training_frame = train_h2o,    
+  validation_frame = val_h2o,    
   ntrees = 200,
   max_depth = 10,
   learn_rate = 0.005,
@@ -814,30 +775,21 @@ calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, mod
   results <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric(), Model = character())
   
   for (threshold in thresholds) {
-    # Convert probabilities to binary predictions
     predicted_classes <- ifelse(predictions > threshold, 1, 0)
-    
-    # Create confusion matrix
     conf_matrix <- table(Predicted = predicted_classes, Actual = y_actual)
-    
-    # Extract TP, TN, FP, FN (handle missing categories with tryCatch)
     tn <- tryCatch(conf_matrix[1, 1], error = function(e) 0)
     tp <- tryCatch(conf_matrix[2, 2], error = function(e) 0)
     fp <- tryCatch(conf_matrix[2, 1], error = function(e) 0)
     fn <- tryCatch(conf_matrix[1, 2], error = function(e) 0)
     
-    # Calculate balanced accuracy
-    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) # Add small value to avoid division by zero
-    
-    # Append results
+    # Calculate balanced accuracy adn append
+    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) 
     results <- rbind(results, data.frame(Threshold = threshold, BalancedAccuracy = balanced_acc, Model = model_name))
   }
   return(results)
 }
-
 # Calculate balanced accuracy for Lasso and Elastic Net
 threshold_results_gbm85<- calculate_balanced_accuracy_1(predictions_gbm, y_val, threshold_values, "Gradient boosting method")
-
 
 # Find and print maximum balanced accuracy for each model
 max_balanced_accuracy_gbm85 <- threshold_results_gbm85[which.max(threshold_results_gbm85$BalancedAccuracy), ]
@@ -851,10 +803,10 @@ cat("Balanced Accuracy:", max_balanced_accuracy_gbm85$BalancedAccuracy, "\n")
 
 ```{r}
 gbm_model_selected90 <- h2o.gbm(
-  x = selected_features_gbm_90,         # Only the selected features
-  y = y,                         # Response variable
-  training_frame = train_h2o,    # Original training data
-  validation_frame = val_h2o,    # Original validation data
+  x = selected_features_gbm_90,         
+  y = y,                         
+  training_frame = train_h2o,   
+  validation_frame = val_h2o,    
   ntrees = 50,
   max_depth = 10,
   learn_rate = 0.005,
@@ -881,22 +833,15 @@ calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, mod
   results <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric(), Model = character())
   
   for (threshold in thresholds) {
-    # Convert probabilities to binary predictions
     predicted_classes <- ifelse(predictions > threshold, 1, 0)
-    
-    # Create confusion matrix
     conf_matrix <- table(Predicted = predicted_classes, Actual = y_actual)
-    
-    # Extract TP, TN, FP, FN (handle missing categories with tryCatch)
     tn <- tryCatch(conf_matrix[1, 1], error = function(e) 0)
     tp <- tryCatch(conf_matrix[2, 2], error = function(e) 0)
     fp <- tryCatch(conf_matrix[2, 1], error = function(e) 0)
     fn <- tryCatch(conf_matrix[1, 2], error = function(e) 0)
     
-    # Calculate balanced accuracy
-    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) # Add small value to avoid division by zero
-    
-    # Append results
+    # Calculate balanced accuracy adn append
+    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) 
     results <- rbind(results, data.frame(Threshold = threshold, BalancedAccuracy = balanced_acc, Model = model_name))
   }
   return(results)
@@ -948,27 +893,19 @@ calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, mod
   results <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric(), Model = character())
   
   for (threshold in thresholds) {
-    # Convert probabilities to binary predictions
     predicted_classes <- ifelse(predictions > threshold, 1, 0)
-    
-    # Create confusion matrix
     conf_matrix <- table(Predicted = predicted_classes, Actual = y_actual)
-    
-    # Extract TP, TN, FP, FN (handle missing categories with tryCatch)
     tn <- tryCatch(conf_matrix[1, 1], error = function(e) 0)
     tp <- tryCatch(conf_matrix[2, 2], error = function(e) 0)
     fp <- tryCatch(conf_matrix[2, 1], error = function(e) 0)
     fn <- tryCatch(conf_matrix[1, 2], error = function(e) 0)
     
-    # Calculate balanced accuracy
-    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) # Add small value to avoid division by zero
-    
-    # Append results
+    # Calculate balanced accuracy adn append
+    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) 
     results <- rbind(results, data.frame(Threshold = threshold, BalancedAccuracy = balanced_acc, Model = model_name))
   }
   return(results)
 }
-
 threshold_results_gbm95<- calculate_balanced_accuracy_1(predictions_gbm, y_val, threshold_values, "Gradient boosting method")
 
 # Find and print maximum balanced accuracy for each model
@@ -1013,27 +950,19 @@ calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, mod
   results <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric(), Model = character())
   
   for (threshold in thresholds) {
-    # Convert probabilities to binary predictions
     predicted_classes <- ifelse(predictions > threshold, 1, 0)
-    
-    # Create confusion matrix
     conf_matrix <- table(Predicted = predicted_classes, Actual = y_actual)
-    
-    # Extract TP, TN, FP, FN (handle missing categories with tryCatch)
     tn <- tryCatch(conf_matrix[1, 1], error = function(e) 0)
     tp <- tryCatch(conf_matrix[2, 2], error = function(e) 0)
     fp <- tryCatch(conf_matrix[2, 1], error = function(e) 0)
     fn <- tryCatch(conf_matrix[1, 2], error = function(e) 0)
     
-    # Calculate balanced accuracy
-    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) # Add small value to avoid division by zero
-    
-    # Append results
+    # Calculate balanced accuracy adn append
+    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) 
     results <- rbind(results, data.frame(Threshold = threshold, BalancedAccuracy = balanced_acc, Model = model_name))
   }
   return(results)
 }
-
 # Calculate balanced accuracy for Lasso and Elastic Net
 threshold_results_gbm100<- calculate_balanced_accuracy_1(predictions_gbm, y_val, threshold_values, "Gradient boosting method")
 
@@ -1134,13 +1063,11 @@ for (i in 1:nrow(importance_gbm)) {
 print(length(selected_features_gbm_118))
 
 
-
-
 gbm_model_selected118 <- h2o.gbm(
-  x = selected_features_gbm_118,         # Only the selected features
-  y = y,                         # Response variable
-  training_frame = train_h2o,    # Original training data
-  validation_frame = val_h2o,    # Original validation data
+  x = selected_features_gbm_118,         
+  y = y,                         
+  training_frame = train_h2o,    
+  validation_frame = val_h2o,   
   ntrees = 50,
   max_depth = 10,
   learn_rate = 0.005,
@@ -1167,22 +1094,15 @@ calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, mod
   results <- data.frame(Threshold = numeric(), BalancedAccuracy = numeric(), Model = character())
   
   for (threshold in thresholds) {
-    # Convert probabilities to binary predictions
     predicted_classes <- ifelse(predictions > threshold, 1, 0)
-    
-    # Create confusion matrix
     conf_matrix <- table(Predicted = predicted_classes, Actual = y_actual)
-    
-    # Extract TP, TN, FP, FN (handle missing categories with tryCatch)
     tn <- tryCatch(conf_matrix[1, 1], error = function(e) 0)
     tp <- tryCatch(conf_matrix[2, 2], error = function(e) 0)
     fp <- tryCatch(conf_matrix[2, 1], error = function(e) 0)
     fn <- tryCatch(conf_matrix[1, 2], error = function(e) 0)
     
-    # Calculate balanced accuracy
-    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) # Add small value to avoid division by zero
-    
-    # Append results
+    # Calculate balanced accuracy adn append
+    balanced_acc <- 0.5 * (tp / (tp + fn + 1e-6) + tn / (tn + fp + 1e-6)) 
     results <- rbind(results, data.frame(Threshold = threshold, BalancedAccuracy = balanced_acc, Model = model_name))
   }
   return(results)
@@ -1190,7 +1110,6 @@ calculate_balanced_accuracy_1 <- function(predictions, y_actual, thresholds, mod
 
 # Calculate balanced accuracy for Lasso and Elastic Net
 threshold_results_gbm118<- calculate_balanced_accuracy_1(predictions_gbm, y_val, threshold_values, "Gradient boosting method")
-
 
 # Find and print maximum balanced accuracy for each model
 max_balanced_accuracy_gbm118 <- threshold_results_gbm118[which.max(threshold_results_gbm118$BalancedAccuracy), ]
@@ -1213,20 +1132,12 @@ print(conf_matrix_gbm118)
 
 
 balanced_accuracy_gbm118 <- calculate_balanced_accuracy(conf_matrix_gbm118)
-cat("The Balanced Accuracy of Gradient Boosting Method on the test set is:", balanced_accuracy_gbm118, "\n")
+cat("The Best Balanced Accuracy of Gradient Boosting Method on the test set is:", balanced_accuracy_gbm118, "\n")
 
 ```
 
 
-
-
-
-
-
-
-
-------------------------XGBOOST------------------------------------------------------------------------------
-
+The next utilized method is XGBoost 
 
 
 ```{r}
@@ -1797,7 +1708,9 @@ cat("Best Balanced Accuraacy for 136 features is:", balan_acc_xg_test_136)
 
 ```
 
---------------------------------------------SVC---------------------------------------------
+--- SUPPORT VECTOR MACHINE ---
+
+The method utilized is Support Vector Classifier
 
 ```{r}
 library(data.table)
