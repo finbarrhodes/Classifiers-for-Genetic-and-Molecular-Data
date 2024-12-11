@@ -345,10 +345,10 @@ for (threshold_xg in threshold_values_xg_valid) {
 
 # Print the results
 # print(threshold_results_xg)
+png("example_chart34634.png", width = 1200, height = 800)
 
 ggplot(threshold_results_xg_valid, aes(x = Threshold_xg, y = BalancedAccuracy_xg)) +
-  geom_line(color = "black", size = 0.8) +
-  geom_point(color = "grey", size = 1) +
+  geom_line(color = "black", size = 1) +
   labs(
     title = "Balanced Accuracy vs. Threshold (XGBoost)",
     x = "Threshold",
@@ -362,11 +362,12 @@ ggplot(threshold_results_xg_valid, aes(x = Threshold_xg, y = BalancedAccuracy_xg
     axis.text = element_text(color = "black"),
     axis.title = element_text(face = "bold")
   )
-
+dev.off() 
 max_balanced_accuracy_xg <- threshold_results_xg_valid[which.max(threshold_results_xg_valid$BalancedAccuracy_xg), ]
 
 # Output the results
-cat("Threshold with Maximum Balanced Accuracy (XGBoost):\n")
+
+
 cat("Threshold_xg:", max_balanced_accuracy_xg$Threshold_xg, "\n")
 cat("Balanced Accuracy_xg:", max_balanced_accuracy_xg$BalancedAccuracy_xg, "\n")
 
